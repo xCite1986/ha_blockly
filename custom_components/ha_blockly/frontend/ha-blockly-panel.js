@@ -436,7 +436,7 @@ class HaBlocklyPanel extends HTMLElement {
       buildFromIR(this._workspace, ir, this._Blockly);
       if (ir.name) this._q("#hab-name").value = ir.name;
       this._currentId = null;
-      this._status("KI-Vorschlag erstellt. Prüfen und „Speichern" klicken.");
+      this._status('KI-Vorschlag erstellt. Prüfen und „Speichern" klicken.');
     } catch (err) {
       this._status("KI-Anfrage fehlgeschlagen: " + err.message, true);
     } finally {
