@@ -52,13 +52,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         [StaticPathConfig(PANEL_URL, FRONTEND_DIR, False)]
     )
 
+    # Cache-bust the frontend module by the integration version so browsers
+    # fetch the new bundle after every update instead of a stale cached copy.
+    try:
+        from homeassistant.loader import async_get_integration
+
+        integration = await async_get_integration(hass, DOMAIN)
+        frontend_ver = str(integration.version)
+    except Exception:  # noqa: BLE001
+        frontend_ver = str(entry.version)
+
     # Register the sidebar panel (custom web component served from above).
     try:
         await panel_custom.async_register_panel(
             hass,
             webcomponent_name=PANEL_NAME,
             frontend_url_path=PANEL_PATH,
-            module_url=f"{PANEL_URL}/ha-blockly-panel.js?v={entry.version}.0",
+            module_url=f"{PANEL_URL}/ha-blockly-panel.js?v={frontend_ver}",
             sidebar_title=PANEL_TITLE,
             sidebar_icon=PANEL_ICON,
             require_admin=True,
