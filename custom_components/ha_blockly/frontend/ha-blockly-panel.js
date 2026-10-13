@@ -142,6 +142,8 @@ class HaBlocklyPanel extends HTMLElement {
     this._q("#hab-refresh").onclick = () => this._loadData();
     this._q("#hab-ai-go").onclick = () => this._aiGenerate();
 
+    this._setupAutocomplete();
+
     try {
       const Blockly = await loadBlockly();
       defineBlocks(Blockly);
@@ -172,6 +174,29 @@ class HaBlocklyPanel extends HTMLElement {
 
   _q(sel) {
     return this.querySelector(sel);
+  }
+
+  _setupAutocomplete() {
+    // Expose live entity/domain/service lists to the searchable Blockly fields.
+    const getHass = () => this._hass;
+    window.__haBlockly = {
+      entities: () => {
+        const h = getHass();
+        return h && h.states ? Object.keys(h.states).sort() : [];
+      },
+      domains: () => {
+        const h = getHass();
+        return h && h.services ? Object.keys(h.services).sort() : [];
+      },
+      services: (domain) => {
+        const h = getHass();
+        const svc = (h && h.services) || {};
+        if (domain && svc[domain]) return Object.keys(svc[domain]).sort();
+        const out = [];
+        for (const d in svc) for (const s in svc[d]) out.push(d + "." + s);
+        return out.sort();
+      },
+    };
   }
 
   _injectBlocklyStyles() {

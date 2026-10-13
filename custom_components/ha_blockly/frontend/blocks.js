@@ -1,7 +1,66 @@
 // Custom Blockly block definitions + toolbox for Home Assistant.
 // defineBlocks(Blockly) must be called after the Blockly global is loaded.
 
+// A text field with a native, searchable <datalist> of Home Assistant
+// entities / domains / services. Free text is still allowed. Options come from
+// window.__haBlockly, which the panel keeps in sync with the live hass object.
+function defineSearchField(Blockly) {
+  if (Blockly.__haFieldSearch) return;
+  class FieldSearch extends Blockly.FieldTextInput {
+    constructor(value, variant, validator) {
+      super(value == null ? "" : value, validator);
+      this.variant_ = variant || "entity";
+    }
+    static fromJson(options) {
+      return new FieldSearch(options.text, options.variant);
+    }
+    _options() {
+      const api = window.__haBlockly || {};
+      try {
+        if (this.variant_ === "domain") return api.domains ? api.domains() : [];
+        if (this.variant_ === "service") {
+          const block = this.getSourceBlock && this.getSourceBlock();
+          const dom = block ? block.getFieldValue("DOMAIN") : null;
+          return api.services ? api.services(dom) : [];
+        }
+        return api.entities ? api.entities() : [];
+      } catch (e) {
+        return [];
+      }
+    }
+    widgetCreate_() {
+      const input = super.widgetCreate_();
+      try {
+        const dl = document.createElement("datalist");
+        dl.id = "hab-dl-" + Math.random().toString(36).slice(2);
+        for (const o of this._options()) {
+          const op = document.createElement("option");
+          op.value = o;
+          dl.appendChild(op);
+        }
+        document.body.appendChild(dl);
+        input.setAttribute("list", dl.id);
+        input.setAttribute("autocomplete", "off");
+        this._dl_ = dl;
+      } catch (e) {
+        /* ignore */
+      }
+      return input;
+    }
+    widgetDispose_() {
+      super.widgetDispose_();
+      if (this._dl_) {
+        this._dl_.remove();
+        this._dl_ = null;
+      }
+    }
+  }
+  Blockly.fieldRegistry.register("field_search", FieldSearch);
+  Blockly.__haFieldSearch = true;
+}
+
 export function defineBlocks(Blockly) {
+  defineSearchField(Blockly);
   const C_TRIGGER = 230;
   const C_ACTION = 160;
   const C_LOGIC = 210;
@@ -13,7 +72,7 @@ export function defineBlocks(Blockly) {
     {
       type: "ha_on_state",
       message0: "Wenn Entität %1 sich ändert",
-      args0: [{ type: "field_input", name: "ENTITY", text: "sensor.beispiel" }],
+      args0: [{ type: "field_search", name: "ENTITY", text: "sensor.beispiel", variant: "entity" }],
       message1: "nach (Zielzustand) %1",
       args1: [{ type: "field_input", name: "TO", text: "" }],
       message2: "von (Startzustand) %1  Attribut %2",
@@ -60,11 +119,11 @@ export function defineBlocks(Blockly) {
       type: "ha_call_service",
       message0: "Dienst %1 . %2",
       args0: [
-        { type: "field_input", name: "DOMAIN", text: "light" },
-        { type: "field_input", name: "SERVICE", text: "turn_on" },
+        { type: "field_search", name: "DOMAIN", text: "light", variant: "domain" },
+        { type: "field_search", name: "SERVICE", text: "turn_on", variant: "service" },
       ],
       message1: "Ziel-Entität %1",
-      args1: [{ type: "field_input", name: "ENTITY", text: "light.wohnzimmer" }],
+      args1: [{ type: "field_search", name: "ENTITY", text: "light.wohnzimmer", variant: "entity" }],
       message2: "Daten (JSON) %1",
       args2: [{ type: "field_input", name: "DATA", text: "" }],
       message3: "Verzögerung %1 Sekunden",
@@ -213,7 +272,7 @@ export function defineBlocks(Blockly) {
       type: "ha_state",
       message0: "Zustand von %1 Attribut %2",
       args0: [
-        { type: "field_input", name: "ENTITY", text: "sensor.beispiel" },
+        { type: "field_search", name: "ENTITY", text: "sensor.beispiel", variant: "entity" },
         { type: "field_input", name: "ATTRIBUTE", text: "" },
       ],
       output: null,
