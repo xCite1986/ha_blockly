@@ -2,6 +2,7 @@
 
 export function buildFromIR(workspace, ir, Blockly) {
   workspace.clear();
+  ir = normalizeIR(ir);
   if (!ir || !Array.isArray(ir.triggers) || ir.triggers.length === 0) {
     return;
   }
@@ -209,6 +210,138 @@ function buildValue(workspace, expr, Blockly) {
       return null;
   }
   return block;
+}
+
+// --- Normalization ------------------------------------------------------
+// LLMs frequently emit native Home Assistant automation JSON
+// ("trigger"/"platform"/"action"/"service"/"alias") instead of our IR.
+// Convert such shapes (and partial ones) into canonical IR so blocks render.
+
+export function normalizeIR(ir) {
+  if (!ir || typeof ir !== "object") return ir;
+  // Already canonical with the right keys? Still run through to coerce triggers.
+  const out = { version: 1 };
+  out.name = ir.name || ir.alias || ir.title || "";
+
+  let trigs = ir.triggers || ir.trigger || [];
+  if (!Array.isArray(trigs)) trigs = [trigs];
+  out.triggers = trigs.map(normTrigger).filter(Boolean);
+
+  let acts = ir.actions || ir.action || [];
+  if (!Array.isArray(acts)) acts = [acts];
+  let actions = acts.map(normAction).filter(Boolean);
+
+  let conds = ir.condition || ir.conditions;
+  if (conds) {
+    if (!Array.isArray(conds)) conds = [conds];
+    conds = conds.map(normCondition).filter(Boolean);
+    if (conds.length) {
+      const condition =
+        conds.length === 1 ? conds[0] : { type: "logic", op: "and", items: conds };
+      actions = [{ type: "if", condition, then: actions, else: [] }];
+    }
+  }
+  out.actions = actions;
+  return out;
+}
+
+const CANON_STMT = new Set([
+  "service", "if", "set_var", "wait", "repeat", "log", "notify", "fire_event",
+]);
+
+function parseSeconds(v) {
+  if (v == null) return 0;
+  if (typeof v === "number") return v;
+  if (typeof v === "object") {
+    return (
+      (Number(v.hours) || 0) * 3600 +
+      (Number(v.minutes) || 0) * 60 +
+      (Number(v.seconds) || 0) +
+      (Number(v.milliseconds) || 0) / 1000
+    );
+  }
+  if (typeof v === "string") {
+    if (v.includes(":")) {
+      const p = v.split(":").map(Number);
+      while (p.length < 3) p.unshift(0);
+      return p[0] * 3600 + p[1] * 60 + p[2];
+    }
+    const n = Number(v);
+    return isNaN(n) ? 0 : n;
+  }
+  return 0;
+}
+
+function firstEntity(e) {
+  if (Array.isArray(e)) return e.join(", ");
+  return e;
+}
+
+function normTrigger(t) {
+  if (!t || typeof t !== "object") return null;
+  const type = t.type || t.platform;
+  if (type === "time") return { type: "time", at: t.at || "00:00:00" };
+  if (type === "state" || type === "numeric_state") {
+    const r = { type: "state", entity: firstEntity(t.entity || t.entity_id) };
+    if (t.to != null) r.to = t.to;
+    if (t.from != null) r.from = t.from;
+    if (t.attribute) r.attribute = t.attribute;
+    const f = parseSeconds(t.for);
+    if (f) r.for = f;
+    return r.entity ? r : null;
+  }
+  if (type === "homeassistant" || type === "ha_start") return { type: "ha_start" };
+  if (type === "event") return { type: "event", event_type: t.event_type };
+  return null;
+}
+
+function normAction(a) {
+  if (!a || typeof a !== "object") return null;
+  if (a.type && CANON_STMT.has(a.type)) return a; // already canonical
+  const svc = a.service || a.action;
+  if (typeof svc === "string" && svc.includes(".")) {
+    const idx = svc.indexOf(".");
+    const st = { type: "service", domain: svc.slice(0, idx), service: svc.slice(idx + 1) };
+    const tgt = a.target || {};
+    const entity = tgt.entity_id || a.entity_id || (a.data && a.data.entity_id);
+    if (entity) st.target = { entity_id: firstEntity(entity) };
+    const data = Object.assign({}, a.data);
+    delete data.entity_id;
+    if (Object.keys(data).length) st.data = data;
+    return st;
+  }
+  if (a.delay != null) {
+    return { type: "wait", seconds: { type: "const", value: parseSeconds(a.delay) } };
+  }
+  return null; // unsupported step (choose/repeat/wait_template) -> dropped
+}
+
+function normCondition(c) {
+  if (!c || typeof c !== "object") return null;
+  const type = c.type || c.condition;
+  if (type === "state") {
+    return {
+      type: "compare",
+      left: { type: "state", entity: firstEntity(c.entity || c.entity_id) },
+      op: "==",
+      right: { type: "const", value: c.state },
+    };
+  }
+  if (type === "numeric_state") {
+    const left = { type: "state", entity: firstEntity(c.entity || c.entity_id) };
+    if (c.attribute) left.attribute = c.attribute;
+    if (c.above != null)
+      return { type: "compare", left, op: ">", right: { type: "const", value: Number(c.above) } };
+    if (c.below != null)
+      return { type: "compare", left, op: "<", right: { type: "const", value: Number(c.below) } };
+    return { type: "expr", value: left };
+  }
+  if (type === "template")
+    return { type: "expr", value: { type: "template", template: c.value_template || c.template } };
+  if (type === "and" || type === "or")
+    return { type: "logic", op: type, items: (c.conditions || []).map(normCondition).filter(Boolean) };
+  if (c.type) return c; // already canonical
+  return null;
 }
 
 function literalBlock(workspace, value, Blockly) {

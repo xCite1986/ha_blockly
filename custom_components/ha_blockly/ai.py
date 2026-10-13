@@ -56,7 +56,12 @@ Expressions (anywhere a value is expected):
   {"type":"math","op":"+"|"-"|"*"|"/"|"%","a":<expr>,"b":<expr>}
 
 To pass an expression as a service data value, wrap it: "data":{"brightness":{"__expr__":{"type":"const","value":255}}}.
-Only use entity_ids and services that appear in the provided context. Prefer simple rules."""
+Only use entity_ids and services that appear in the provided context. Prefer simple rules.
+
+IMPORTANT: Do NOT output a Home Assistant automation. Do NOT use the keys
+"platform", "alias", "mode", or a top-level "service" string. Use ONLY this
+schema: "triggers" (with "type"), "actions" (with "type"), and split services
+into "domain" + "service"."""
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
