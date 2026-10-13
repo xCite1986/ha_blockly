@@ -1,0 +1,415 @@
+"""Runtime that interprets compiled Blockly rules (IR) in Home Assistant.
+
+The frontend compiles each Blockly workspace into a small JSON intermediate
+representation (IR). This engine registers the triggers of every enabled rule
+and executes the action list when a trigger fires. Keeping block->IR compilation
+in the frontend keeps this interpreter small and language-agnostic.
+
+IR shape (version 1)::
+
+    { "version": 1, "triggers": [ <trigger> ], "actions": [ <statement> ] }
+
+See README.md for the full schema.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import time as dt_time
+from typing import Any
+
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import template
+from homeassistant.helpers.event import (
+    async_track_point_in_time,
+    async_track_state_change_event,
+    async_track_time_change,
+)
+import homeassistant.util.dt as dt_util
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class BlocklyEngine:
+    """Loads rules from the store and keeps their triggers wired up."""
+
+    def __init__(self, hass: HomeAssistant, store) -> None:
+        self._hass = hass
+        self._store = store
+        self._unsubs: list = []
+        self._tasks: set[asyncio.Task] = set()
+
+    async def async_start(self) -> None:
+        self.reload()
+
+    @callback
+    def reload(self) -> None:
+        """Tear down all trigger listeners and re-register from the store."""
+        self._teardown()
+        for rule in self._store.list_rules():
+            if not rule.get("enabled", True):
+                continue
+            try:
+                self._setup_rule(rule)
+            except Exception:  # noqa: BLE001 - never let one bad rule break reload
+                _LOGGER.exception("Failed to set up Blockly rule %s", rule.get("name"))
+
+    @callback
+    def _teardown(self) -> None:
+        while self._unsubs:
+            try:
+                self._unsubs.pop()()
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def async_run_rule(self, rule_id: str) -> bool:
+        """Run a rule's action list immediately (ignoring triggers). For testing."""
+        rule = self._store.get_rule(rule_id)
+        if rule is None:
+            return False
+        actions = (rule.get("ir") or {}).get("actions") or []
+        await self._run(rule.get("name", rule_id), actions, {"trigger": {"platform": "manual"}})
+        return True
+
+    async def async_unload(self) -> None:
+        self._teardown()
+        for task in list(self._tasks):
+            task.cancel()
+        self._tasks.clear()
+
+    # --- Trigger wiring ---------------------------------------------------
+
+    @callback
+    def _setup_rule(self, rule: dict[str, Any]) -> None:
+        ir = rule.get("ir") or {}
+        triggers = ir.get("triggers") or []
+        actions = ir.get("actions") or []
+        name = rule.get("name", rule.get("id"))
+
+        for trig in triggers:
+            ttype = trig.get("type")
+            if ttype == "state":
+                self._setup_state_trigger(name, trig, actions)
+            elif ttype == "time":
+                self._setup_time_trigger(name, trig, actions)
+            elif ttype == "event":
+                self._setup_event_trigger(name, trig, actions)
+            elif ttype == "ha_start":
+                self._unsubs.append(
+                    self._hass.bus.async_listen_once(
+                        EVENT_HOMEASSISTANT_STARTED,
+                        lambda e, a=actions, n=name: self._fire(n, a, {"trigger": {"platform": "homeassistant"}}),
+                    )
+                )
+            else:
+                _LOGGER.warning("Rule %s: unknown trigger type %s", name, ttype)
+
+    @callback
+    def _setup_state_trigger(self, name, trig, actions) -> None:
+        entities = trig.get("entity")
+        if isinstance(entities, str):
+            entities = [entities]
+        if not entities:
+            return
+        to_state = trig.get("to")
+        from_state = trig.get("from")
+        attribute = trig.get("attribute")
+        for_seconds = trig.get("for")
+        pending: dict[str, asyncio.Task] = {}
+
+        @callback
+        def _handle(event: Event) -> None:
+            new = event.data.get("new_state")
+            old = event.data.get("old_state")
+            if new is None:
+                return
+
+            def _val(state_obj):
+                if state_obj is None:
+                    return None
+                if attribute:
+                    return state_obj.attributes.get(attribute)
+                return state_obj.state
+
+            new_v = _val(new)
+            old_v = _val(old)
+            if to_state is not None and str(new_v) != str(to_state):
+                return
+            if from_state is not None and str(old_v) != str(from_state):
+                return
+            if to_state is None and from_state is None and new_v == old_v:
+                return  # attribute/other change we don't care about
+
+            ctx = {
+                "trigger": {
+                    "platform": "state",
+                    "entity_id": event.data.get("entity_id"),
+                    "from_state": old_v,
+                    "to_state": new_v,
+                }
+            }
+            if for_seconds:
+                eid = event.data.get("entity_id")
+                if eid in pending:
+                    pending[eid].cancel()
+
+                async def _delayed(seconds=for_seconds, a=actions, c=ctx, e=eid):
+                    try:
+                        await asyncio.sleep(float(seconds))
+                        self._fire(name, a, c)
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        pending.pop(e, None)
+
+                pending[eid] = self._hass.async_create_task(_delayed())
+            else:
+                self._fire(name, actions, ctx)
+
+        self._unsubs.append(
+            async_track_state_change_event(self._hass, entities, _handle)
+        )
+
+    @callback
+    def _setup_time_trigger(self, name, trig, actions) -> None:
+        at = trig.get("at", "00:00:00")
+        parts = [int(p) for p in str(at).split(":")]
+        while len(parts) < 3:
+            parts.append(0)
+        h, m, s = parts[:3]
+
+        @callback
+        def _handle(now) -> None:
+            self._fire(name, actions, {"trigger": {"platform": "time", "now": now.isoformat()}})
+
+        self._unsubs.append(
+            async_track_time_change(self._hass, _handle, hour=h, minute=m, second=s)
+        )
+
+    @callback
+    def _setup_event_trigger(self, name, trig, actions) -> None:
+        event_type = trig.get("event_type")
+        if not event_type:
+            return
+        wanted = trig.get("data") or {}
+
+        @callback
+        def _handle(event: Event) -> None:
+            for k, v in wanted.items():
+                if str(event.data.get(k)) != str(v):
+                    return
+            self._fire(name, actions, {"trigger": {"platform": "event", "event": dict(event.data)}})
+
+        self._unsubs.append(self._hass.bus.async_listen(event_type, _handle))
+
+    # --- Execution --------------------------------------------------------
+
+    @callback
+    def _fire(self, name: str, actions: list, ctx: dict) -> None:
+        task = self._hass.async_create_task(self._run(name, actions, ctx))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _run(self, name: str, actions: list, ctx: dict) -> None:
+        variables: dict[str, Any] = {}
+        _LOGGER.debug("Blockly rule '%s' triggered", name)
+        try:
+            await self._exec_block(actions, variables, ctx)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Error while running Blockly rule '%s'", name)
+
+    async def _exec_block(self, statements: list, variables: dict, ctx: dict) -> None:
+        for stmt in statements or []:
+            await self._exec_statement(stmt, variables, ctx)
+
+    async def _exec_statement(self, stmt: dict, variables: dict, ctx: dict) -> None:
+        stype = stmt.get("type")
+        if stype == "service":
+            await self._do_service(stmt, variables, ctx)
+        elif stype == "if":
+            cond = self._eval_condition(stmt.get("condition"), variables, ctx)
+            branch = stmt.get("then") if cond else stmt.get("else")
+            await self._exec_block(branch or [], variables, ctx)
+        elif stype == "set_var":
+            variables[stmt["name"]] = self._eval(stmt.get("value"), variables, ctx)
+        elif stype == "wait":
+            seconds = self._eval(stmt.get("seconds"), variables, ctx)
+            await asyncio.sleep(float(seconds or 0))
+        elif stype == "repeat":
+            count = int(self._eval(stmt.get("count"), variables, ctx) or 0)
+            for _ in range(count):
+                await self._exec_block(stmt.get("do") or [], variables, ctx)
+        elif stype == "log":
+            level = stmt.get("level", "info")
+            msg = self._eval(stmt.get("message"), variables, ctx)
+            getattr(_LOGGER, level if level in ("debug", "info", "warning", "error") else "info")(
+                "[Blockly] %s", msg
+            )
+        elif stype == "notify":
+            await self._do_notify(stmt, variables, ctx)
+        elif stype == "fire_event":
+            self._hass.bus.async_fire(
+                stmt.get("event_type", "ha_blockly_event"),
+                self._eval_data(stmt.get("data") or {}, variables, ctx),
+            )
+        else:
+            _LOGGER.warning("Unknown statement type: %s", stype)
+
+    async def _do_service(self, stmt: dict, variables: dict, ctx: dict) -> None:
+        delay = self._eval(stmt.get("delay"), variables, ctx)
+        if delay:
+            await asyncio.sleep(float(delay))
+        domain = stmt.get("domain")
+        service = stmt.get("service")
+        if not domain or not service:
+            return
+        data = self._eval_data(stmt.get("data") or {}, variables, ctx)
+        target = stmt.get("target") or {}
+        if target.get("entity_id"):
+            data["entity_id"] = target["entity_id"]
+        await self._hass.services.async_call(domain, service, data, blocking=False)
+
+    async def _do_notify(self, stmt: dict, variables: dict, ctx: dict) -> None:
+        service = stmt.get("service", "notify")
+        domain, _, svc = service.partition(".")
+        if not svc:
+            domain, svc = "notify", domain
+        data: dict[str, Any] = {"message": str(self._eval(stmt.get("message"), variables, ctx))}
+        if stmt.get("title") is not None:
+            data["title"] = str(self._eval(stmt.get("title"), variables, ctx))
+        await self._hass.services.async_call(domain, svc, data, blocking=False)
+
+    def _eval_data(self, data: dict, variables: dict, ctx: dict) -> dict:
+        out: dict[str, Any] = {}
+        for key, value in data.items():
+            if isinstance(value, dict) and value.get("__expr__"):
+                out[key] = self._eval(value["__expr__"], variables, ctx)
+            else:
+                out[key] = value
+        return out
+
+    # --- Expression & condition evaluation -------------------------------
+
+    def _eval_condition(self, cond: dict | None, variables: dict, ctx: dict) -> bool:
+        if not cond:
+            return True
+        ctype = cond.get("type")
+        if ctype == "compare":
+            left = self._eval(cond.get("left"), variables, ctx)
+            right = self._eval(cond.get("right"), variables, ctx)
+            return _compare(left, cond.get("op", "=="), right)
+        if ctype == "logic":
+            items = [self._eval_condition(c, variables, ctx) for c in cond.get("items", [])]
+            if cond.get("op") == "or":
+                return any(items)
+            return all(items)
+        if ctype == "not":
+            return not self._eval_condition(cond.get("item"), variables, ctx)
+        if ctype == "expr":
+            return bool(self._eval(cond.get("value"), variables, ctx))
+        return True
+
+    def _eval(self, expr, variables: dict, ctx: dict):
+        if expr is None:
+            return None
+        if not isinstance(expr, dict):
+            return expr  # literal
+        etype = expr.get("type")
+        if etype == "const":
+            return expr.get("value")
+        if etype == "var":
+            return variables.get(expr.get("name"))
+        if etype == "state":
+            return self._read_state(expr.get("entity"), expr.get("attribute"))
+        if etype == "template":
+            return self._render_template(expr.get("template", ""), variables, ctx)
+        if etype == "math":
+            return _math(
+                self._eval(expr.get("a"), variables, ctx),
+                expr.get("op", "+"),
+                self._eval(expr.get("b"), variables, ctx),
+            )
+        if etype == "str":
+            return "".join(str(self._eval(p, variables, ctx)) for p in expr.get("parts", []))
+        if etype == "now":
+            return dt_util.now().isoformat()
+        return None
+
+    def _read_state(self, entity: str | None, attribute: str | None):
+        if not entity:
+            return None
+        state = self._hass.states.get(entity)
+        if state is None:
+            return None
+        if attribute:
+            return state.attributes.get(attribute)
+        return _coerce(state.state)
+
+    def _render_template(self, tpl: str, variables: dict, ctx: dict):
+        try:
+            tmpl = template.Template(tpl, self._hass)
+            return tmpl.async_render({"variables": variables, "trigger": ctx.get("trigger")})
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Template error in Blockly rule: %s", err)
+            return None
+
+
+def _coerce(value):
+    """Turn a state string into a number when it looks like one."""
+    if value in (None, "unknown", "unavailable", ""):
+        return value
+    try:
+        if "." in str(value):
+            return float(value)
+        return int(value)
+    except (ValueError, TypeError):
+        return value
+
+
+def _compare(left, op, right) -> bool:
+    left = _coerce(left)
+    right = _coerce(right)
+    try:
+        if op in ("==", "="):
+            return str(left) == str(right) if not _both_num(left, right) else left == right
+        if op in ("!=", "<>"):
+            return str(left) != str(right) if not _both_num(left, right) else left != right
+        if op == ">":
+            return float(left) > float(right)
+        if op == ">=":
+            return float(left) >= float(right)
+        if op == "<":
+            return float(left) < float(right)
+        if op == "<=":
+            return float(left) <= float(right)
+    except (ValueError, TypeError):
+        return False
+    return False
+
+
+def _both_num(a, b) -> bool:
+    return isinstance(a, (int, float)) and isinstance(b, (int, float))
+
+
+def _math(a, op, b):
+    try:
+        a = float(a)
+        b = float(b)
+    except (ValueError, TypeError):
+        if op == "+":
+            return f"{a}{b}"
+        return None
+    if op == "+":
+        return a + b
+    if op == "-":
+        return a - b
+    if op == "*":
+        return a * b
+    if op == "/":
+        return a / b if b else None
+    if op == "%":
+        return a % b if b else None
+    return None

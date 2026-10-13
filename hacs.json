@@ -1,0 +1,8 @@
+{
+  "name": "HA Blockly Automations",
+  "render_readme": true,
+  "homeassistant": "2024.8.0",
+  "zip_release": false,
+  "filename": "ha_blockly",
+  "hide_default_branch": true
+}

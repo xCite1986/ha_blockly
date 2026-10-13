@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA Blockly Automatisierungen",
+        "description": "Fügt einen visuellen Blockly-Automatisierungseditor zur Seitenleiste hinzu."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Bereits konfiguriert. Es ist nur eine Instanz erlaubt."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Blockly-Optionen",
+        "data": {
+          "conversation_agent": "Standard-Konversationsagent für den KI-Editor (Agent-ID, leer = HA-Standard)"
+        }
+      }
+    }
+  }
+}

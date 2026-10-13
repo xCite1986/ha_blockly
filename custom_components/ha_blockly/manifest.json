@@ -1,0 +1,14 @@
+{
+  "domain": "ha_blockly",
+  "name": "HA Blockly Automations",
+  "codeowners": ["@xCite1986"],
+  "config_flow": true,
+  "dependencies": ["http", "websocket_api", "frontend"],
+  "after_dependencies": ["conversation"],
+  "documentation": "https://github.com/xCite1986/ha_blockly",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/xCite1986/ha_blockly/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
