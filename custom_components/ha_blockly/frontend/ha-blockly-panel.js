@@ -154,6 +154,11 @@ class HaBlocklyPanel extends HTMLElement {
         move: { scrollbars: true, drag: true, wheel: true },
       });
       this._Blockly = Blockly;
+      // Blockly injects its CSS into document.head, which does not cross the
+      // shadow-DOM boundary of the HA panel. Clone those styles into our root
+      // node so the toolbox categories and block flyout are styled/visible.
+      this._injectBlocklyStyles();
+      Blockly.svgResize(this._workspace);
       const ro = new ResizeObserver(() => Blockly.svgResize(this._workspace));
       ro.observe(this._q("#hab-blockly"));
     } catch (err) {
@@ -167,6 +172,21 @@ class HaBlocklyPanel extends HTMLElement {
 
   _q(sel) {
     return this.querySelector(sel);
+  }
+
+  _injectBlocklyStyles() {
+    try {
+      const root = this.getRootNode();
+      if (!root || root === document || typeof root.querySelectorAll !== "function") {
+        return;
+      }
+      document.querySelectorAll('style[id^="blockly-"]').forEach((s) => {
+        if (root.getElementById && root.getElementById(s.id)) return;
+        root.appendChild(s.cloneNode(true));
+      });
+    } catch (e) {
+      /* non-fatal: styles may already be present */
+    }
   }
 
   _status(msg, isError) {
