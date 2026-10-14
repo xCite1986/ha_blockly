@@ -302,6 +302,37 @@ class HaBlocklyPanel extends HTMLElement {
         const st = h && h.states && h.states[entityId];
         return st && st.attributes ? st.attributes.friendly_name || "" : "";
       },
+      stateOptions: (entityId) => {
+        const h = getHass();
+        if (!entityId) return [];
+        const domain = entityId.split(".")[0];
+        const st = h && h.states && h.states[entityId];
+        const cur = st ? st.state : null;
+        const attrs = (st && st.attributes) || {};
+        const BOOL = ["on", "off"];
+        const map = {
+          binary_sensor: BOOL, switch: BOOL, light: BOOL, input_boolean: BOOL,
+          fan: BOOL, automation: BOOL, script: BOOL, remote: BOOL, siren: BOOL,
+          humidifier: BOOL, update: BOOL, schedule: BOOL,
+          cover: ["open", "closed", "opening", "closing"],
+          lock: ["locked", "unlocked", "locking", "unlocking", "jammed", "open"],
+          person: ["home", "not_home"], device_tracker: ["home", "not_home"],
+          media_player: ["playing", "paused", "idle", "off", "on", "standby", "buffering"],
+          climate: attrs.hvac_modes || ["off", "heat", "cool", "auto", "heat_cool", "dry", "fan_only"],
+          alarm_control_panel: ["disarmed", "armed_home", "armed_away", "armed_night", "armed_vacation", "pending", "triggered", "arming"],
+          vacuum: ["cleaning", "docked", "paused", "idle", "returning", "error"],
+          sun: ["above_horizon", "below_horizon"],
+          input_select: attrs.options || [],
+          select: attrs.options || [],
+          weather: ["sunny", "clear-night", "cloudy", "fog", "hail", "lightning", "partlycloudy", "pouring", "rainy", "snowy", "windy"],
+        };
+        let opts = map[domain] ? map[domain].slice() : [];
+        if (cur != null && cur !== "unknown" && cur !== "unavailable" && opts.indexOf(cur) === -1) {
+          opts.unshift(cur);
+        }
+        if (!opts.length && cur != null) opts = [cur];
+        return opts;
+      },
     };
   }
 

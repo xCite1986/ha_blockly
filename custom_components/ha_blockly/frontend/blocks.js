@@ -51,6 +51,11 @@ function defineSearchField(Blockly) {
           const dom = block ? block.getFieldValue("DOMAIN") : null;
           return api.services ? api.services(dom) : [];
         }
+        if (this.variant_ === "state") {
+          const block = this.getSourceBlock && this.getSourceBlock();
+          const ent = block ? block.getFieldValue("ENTITY") : null;
+          return api.stateOptions ? api.stateOptions(ent) : [];
+        }
         return api.entities ? api.entities() : [];
       } catch (e) {
         return [];
@@ -77,7 +82,9 @@ function defineSearchField(Blockly) {
       search.type = "text";
       search.className = "hab-fs-search";
       search.placeholder = "Suchen…";
-      search.value = "";
+      // Pre-fill with the current value and select it so it can be copied (Ctrl+C);
+      // the list still shows all options until the user types.
+      search.value = this.getValue() == null ? "" : String(this.getValue());
       const list = document.createElement("div");
       list.className = "hab-fs-list";
       wrap.appendChild(search);
@@ -124,14 +131,18 @@ function defineSearchField(Blockly) {
           list.appendChild(item);
         }
       };
+      let edited = false;
       render("");
-      search.addEventListener("input", () => render(search.value));
+      search.addEventListener("input", () => {
+        edited = true;
+        render(search.value);
+      });
       search.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") {
           ev.preventDefault();
           const first = list.querySelector(".hab-fs-item");
-          if (first) commit(first.firstChild.textContent);
-          else if (search.value) commit(search.value);
+          if (edited && first) commit(first.firstChild.textContent);
+          else commit(search.value); // unchanged prefill, typed text, or empty to clear
         } else if (ev.key === "Escape") {
           DD.hideIfOwner(this);
         }
@@ -139,7 +150,10 @@ function defineSearchField(Blockly) {
 
       DD.setColour(dark ? "#2b2b2b" : "#ffffff", dark ? "#444444" : "#cccccc");
       DD.showPositionedByField(this, () => {});
-      setTimeout(() => search.focus(), 0);
+      setTimeout(() => {
+        search.focus();
+        search.select();
+      }, 0);
     }
   }
 
@@ -162,10 +176,10 @@ export function defineBlocks(Blockly) {
       message0: "Wenn Entität %1 sich ändert",
       args0: [{ type: "field_search", name: "ENTITY", text: "sensor.beispiel", variant: "entity" }],
       message1: "nach (Zielzustand) %1",
-      args1: [{ type: "field_input", name: "TO", text: "" }],
+      args1: [{ type: "field_search", name: "TO", text: "", variant: "state" }],
       message2: "von (Startzustand) %1  Attribut %2",
       args2: [
-        { type: "field_input", name: "FROM", text: "" },
+        { type: "field_search", name: "FROM", text: "", variant: "state" },
         { type: "field_input", name: "ATTRIBUTE", text: "" },
       ],
       message3: "für %1 Sekunden",
