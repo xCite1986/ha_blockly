@@ -293,6 +293,14 @@ class HaBlocklyPanel extends HTMLElement {
       }
       this._applyTheme(saved);
 
+      // Close the toolbox flyout after a block is dragged into the workspace.
+      try {
+        const flyout = this._workspace.getFlyout();
+        if (flyout) flyout.autoClose = true;
+      } catch (e) {
+        /* ignore */
+      }
+
       const ro = new ResizeObserver(() => Blockly.svgResize(this._workspace));
       ro.observe(this._q("#hab-blockly"));
     } catch (err) {
