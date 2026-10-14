@@ -44,6 +44,13 @@ class BlocklyEngine:
         self._store = store
         self._unsubs: list = []
         self._tasks: set[asyncio.Task] = set()
+        # Per-rule execution traces (most recent last), capped per rule.
+        self._traces: dict[str, list] = {}
+        self._max_traces = 15
+
+    def get_traces(self, rule_id: str) -> list:
+        """Return recorded execution traces for a rule (most recent first)."""
+        return list(reversed(self._traces.get(rule_id, [])))
 
     async def async_start(self) -> None:
         self.reload()
@@ -68,14 +75,18 @@ class BlocklyEngine:
             except Exception:  # noqa: BLE001
                 pass
 
-    async def async_run_rule(self, rule_id: str) -> bool:
-        """Run a rule's action list immediately (ignoring triggers). For testing."""
+    async def async_run_rule(self, rule_id: str) -> dict | None:
+        """Run a rule's action list immediately (ignoring triggers). For testing.
+
+        Returns the execution trace, or None if the rule is unknown.
+        """
         rule = self._store.get_rule(rule_id)
         if rule is None:
-            return False
+            return None
         actions = (rule.get("ir") or {}).get("actions") or []
-        await self._run(rule.get("name", rule_id), actions, {"trigger": {"platform": "manual"}})
-        return True
+        return await self._run(
+            rule_id, rule.get("name", rule_id), actions, {"trigger": {"platform": "manual"}}, test=True
+        )
 
     async def async_unload(self) -> None:
         self._teardown()
@@ -91,33 +102,34 @@ class BlocklyEngine:
         triggers = ir.get("triggers") or []
         actions = ir.get("actions") or []
         name = rule.get("name", rule.get("id"))
+        rid = rule.get("id")
 
         for trig in triggers:
             ttype = trig.get("type")
             if ttype == "state":
-                self._setup_state_trigger(name, trig, actions)
+                self._setup_state_trigger(rid, name, trig, actions)
             elif ttype == "numeric_state":
-                self._setup_numeric_trigger(name, trig, actions)
+                self._setup_numeric_trigger(rid, name, trig, actions)
             elif ttype == "time":
-                self._setup_time_trigger(name, trig, actions)
+                self._setup_time_trigger(rid, name, trig, actions)
             elif ttype == "sun":
-                self._setup_sun_trigger(name, trig, actions)
+                self._setup_sun_trigger(rid, name, trig, actions)
             elif ttype == "zone":
-                self._setup_zone_trigger(name, trig, actions)
+                self._setup_zone_trigger(rid, name, trig, actions)
             elif ttype == "event":
-                self._setup_event_trigger(name, trig, actions)
+                self._setup_event_trigger(rid, name, trig, actions)
             elif ttype == "ha_start":
                 self._unsubs.append(
                     self._hass.bus.async_listen_once(
                         EVENT_HOMEASSISTANT_STARTED,
-                        lambda e, a=actions, n=name: self._fire(n, a, {"trigger": {"platform": "homeassistant"}}),
+                        lambda e, a=actions, n=name, r=rid: self._fire(r, n, a, {"trigger": {"platform": "homeassistant"}}),
                     )
                 )
             else:
                 _LOGGER.warning("Rule %s: unknown trigger type %s", name, ttype)
 
     @callback
-    def _setup_state_trigger(self, name, trig, actions) -> None:
+    def _setup_state_trigger(self, rid, name, trig, actions) -> None:
         entities = trig.get("entity")
         if isinstance(entities, str):
             entities = [entities]
@@ -168,7 +180,7 @@ class BlocklyEngine:
                 async def _delayed(seconds=for_seconds, a=actions, c=ctx, e=eid):
                     try:
                         await asyncio.sleep(float(seconds))
-                        self._fire(name, a, c)
+                        self._fire(rid, name, a, c)
                     except asyncio.CancelledError:
                         pass
                     finally:
@@ -176,14 +188,14 @@ class BlocklyEngine:
 
                 pending[eid] = self._hass.async_create_task(_delayed())
             else:
-                self._fire(name, actions, ctx)
+                self._fire(rid, name, actions, ctx)
 
         self._unsubs.append(
             async_track_state_change_event(self._hass, entities, _handle)
         )
 
     @callback
-    def _setup_time_trigger(self, name, trig, actions) -> None:
+    def _setup_time_trigger(self, rid, name, trig, actions) -> None:
         at = trig.get("at", "00:00:00")
         parts = [int(p) for p in str(at).split(":")]
         while len(parts) < 3:
@@ -192,14 +204,14 @@ class BlocklyEngine:
 
         @callback
         def _handle(now) -> None:
-            self._fire(name, actions, {"trigger": {"platform": "time", "now": now.isoformat()}})
+            self._fire(rid, name, actions, {"trigger": {"platform": "time", "now": now.isoformat()}})
 
         self._unsubs.append(
             async_track_time_change(self._hass, _handle, hour=h, minute=m, second=s)
         )
 
     @callback
-    def _setup_numeric_trigger(self, name, trig, actions) -> None:
+    def _setup_numeric_trigger(self, rid, name, trig, actions) -> None:
         entity = trig.get("entity")
         if not entity:
             return
@@ -250,7 +262,7 @@ class BlocklyEngine:
                     try:
                         await asyncio.sleep(float(sec))
                         if _in_range(_num(self._hass.states.get(entity))):
-                            self._fire(name, a, c)
+                            self._fire(rid, name, a, c)
                     except asyncio.CancelledError:
                         pass
                     finally:
@@ -258,14 +270,14 @@ class BlocklyEngine:
 
                 pending[eid] = self._hass.async_create_task(_delayed())
             else:
-                self._fire(name, actions, ctx)
+                self._fire(rid, name, actions, ctx)
 
         self._unsubs.append(
             async_track_state_change_event(self._hass, [entity], _handle)
         )
 
     @callback
-    def _setup_sun_trigger(self, name, trig, actions) -> None:
+    def _setup_sun_trigger(self, rid, name, trig, actions) -> None:
         event = trig.get("event", "sunset")
         try:
             offset = timedelta(seconds=float(trig.get("offset") or 0))
@@ -273,7 +285,7 @@ class BlocklyEngine:
             offset = timedelta(0)
 
         def _cb():
-            self._fire(name, actions, {"trigger": {"platform": "sun", "event": event}})
+            self._fire(rid, name, actions, {"trigger": {"platform": "sun", "event": event}})
 
         if event == "sunrise":
             self._unsubs.append(async_track_sunrise(self._hass, _cb, offset))
@@ -281,7 +293,7 @@ class BlocklyEngine:
             self._unsubs.append(async_track_sunset(self._hass, _cb, offset))
 
     @callback
-    def _setup_zone_trigger(self, name, trig, actions) -> None:
+    def _setup_zone_trigger(self, rid, name, trig, actions) -> None:
         person = trig.get("entity")
         zone = trig.get("zone")
         event = trig.get("event", "enter")
@@ -310,6 +322,7 @@ class BlocklyEngine:
             )
             if fire:
                 self._fire(
+                    rid,
                     name,
                     actions,
                     {"trigger": {"platform": "zone", "entity_id": person, "from_state": os_, "to_state": ns}},
@@ -320,7 +333,7 @@ class BlocklyEngine:
         )
 
     @callback
-    def _setup_event_trigger(self, name, trig, actions) -> None:
+    def _setup_event_trigger(self, rid, name, trig, actions) -> None:
         event_type = trig.get("event_type")
         if not event_type:
             return
@@ -331,35 +344,81 @@ class BlocklyEngine:
             for k, v in wanted.items():
                 if str(event.data.get(k)) != str(v):
                     return
-            self._fire(name, actions, {"trigger": {"platform": "event", "event": dict(event.data)}})
+            self._fire(rid, name, actions, {"trigger": {"platform": "event", "event": dict(event.data)}})
 
         self._unsubs.append(self._hass.bus.async_listen(event_type, _handle))
 
     # --- Execution --------------------------------------------------------
 
     @callback
-    def _fire(self, name: str, actions: list, ctx: dict) -> None:
-        task = self._hass.async_create_task(self._run(name, actions, ctx))
+    def _fire(self, rid: str, name: str, actions: list, ctx: dict, *, test: bool = False) -> None:
+        task = self._hass.async_create_task(self._run(rid, name, actions, ctx, test=test))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def _run(self, name: str, actions: list, ctx: dict) -> None:
+    async def _run(self, rid: str, name: str, actions: list, ctx: dict, *, test: bool = False) -> dict:
         variables: dict[str, Any] = {}
-        _LOGGER.debug("Blockly rule '%s' triggered", name)
+        start = dt_util.now()
+        trig = ctx.get("trigger") or {}
+        trace: dict[str, Any] = {
+            "id": str(start.timestamp()),
+            "rule_id": rid,
+            "name": name,
+            "test": test,
+            "trigger": trig,
+            "started": start.isoformat(),
+            "status": "ok",
+            "steps": [
+                {
+                    "t": start.isoformat(),
+                    "kind": "trigger",
+                    "label": "Test-Ausführung" if test else f"Ausgelöst durch {trig.get('platform', 'Ereignis')}",
+                    "status": "ok",
+                }
+            ],
+        }
+        _LOGGER.info("Blockly rule '%s' %s", name, "(Test)" if test else "triggered")
         try:
-            await self._exec_block(actions, variables, ctx)
+            await self._exec_block(actions, variables, ctx, trace)
         except _StopRule:
-            _LOGGER.debug("Blockly rule '%s' stopped by stop action", name)
+            trace["status"] = "stopped"
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001
+        except Exception as err:  # noqa: BLE001
+            trace["status"] = "error"
+            trace["error"] = str(err)
             _LOGGER.exception("Error while running Blockly rule '%s'", name)
+        end = dt_util.now()
+        trace["finished"] = end.isoformat()
+        trace["duration"] = round((end - start).total_seconds(), 3)
+        if rid:
+            bucket = self._traces.setdefault(rid, [])
+            bucket.append(trace)
+            del bucket[: max(0, len(bucket) - self._max_traces)]
+        return trace
 
-    async def _exec_block(self, statements: list, variables: dict, ctx: dict) -> None:
+    async def _exec_block(self, statements: list, variables: dict, ctx: dict, trace: dict) -> None:
         for stmt in statements or []:
-            await self._exec_statement(stmt, variables, ctx)
+            step = {
+                "t": dt_util.now().isoformat(),
+                "kind": "action",
+                "label": self._label(stmt, variables, ctx),
+                "status": "running",
+            }
+            trace["steps"].append(step)
+            try:
+                await self._exec_statement(stmt, variables, ctx, trace, step)
+                if step["status"] == "running":
+                    step["status"] = "ok"
+            except _StopRule:
+                step["status"] = "stopped"
+                raise
+            except Exception as err:  # noqa: BLE001
+                step["status"] = "error"
+                step["detail"] = str(err)
+                raise
 
-    async def _exec_statement(self, stmt: dict, variables: dict, ctx: dict) -> None:
+    async def _exec_statement(self, stmt: dict, variables: dict, ctx: dict, trace: dict, step: dict) -> None:
         stype = stmt.get("type")
         if stype == "service":
             await self._do_service(stmt, variables, ctx)
@@ -367,24 +426,27 @@ class BlocklyEngine:
             await self._do_set(stmt, variables, ctx)
         elif stype == "if":
             cond = self._eval_condition(stmt.get("condition"), variables, ctx)
+            step["detail"] = "Bedingung erfüllt" if cond else "Bedingung nicht erfüllt"
             branch = stmt.get("then") if cond else stmt.get("else")
-            await self._exec_block(branch or [], variables, ctx)
+            await self._exec_block(branch or [], variables, ctx, trace)
         elif stype == "set_var":
             variables[stmt["name"]] = self._eval(stmt.get("value"), variables, ctx)
         elif stype == "wait":
             seconds = self._eval(stmt.get("seconds"), variables, ctx)
             await asyncio.sleep(float(seconds or 0))
         elif stype == "wait_until":
-            await self._do_wait_until(stmt, variables, ctx)
+            ok = await self._do_wait_until(stmt, variables, ctx)
+            step["detail"] = "Bedingung erfüllt" if ok else "Timeout"
         elif stype == "stop":
             raise _StopRule()
         elif stype == "repeat":
             count = int(self._eval(stmt.get("count"), variables, ctx) or 0)
             for _ in range(count):
-                await self._exec_block(stmt.get("do") or [], variables, ctx)
+                await self._exec_block(stmt.get("do") or [], variables, ctx, trace)
         elif stype == "log":
             level = stmt.get("level", "info")
             msg = self._eval(stmt.get("message"), variables, ctx)
+            step["detail"] = str(msg)
             getattr(_LOGGER, level if level in ("debug", "info", "warning", "error") else "info")(
                 "[Blockly] %s", msg
             )
@@ -397,6 +459,49 @@ class BlocklyEngine:
             )
         else:
             _LOGGER.warning("Unknown statement type: %s", stype)
+
+    def _label(self, stmt: dict, variables: dict, ctx: dict) -> str:
+        """Human-readable German label for a statement, for the trace timeline."""
+        t = stmt.get("type")
+        try:
+            if t == "service":
+                tgt = (stmt.get("target") or {}).get("entity_id")
+                base = f"Dienst {stmt.get('domain')}.{stmt.get('service')}"
+                return f"{base} → {tgt}" if tgt else base
+            if t == "set":
+                return f"setze {stmt.get('entity')} auf {self._describe(stmt.get('value'))}"
+            if t == "if":
+                return "falls (Bedingung)"
+            if t == "set_var":
+                return f"Variable {stmt.get('name')} setzen"
+            if t == "wait":
+                return f"warte {self._describe(stmt.get('seconds'))} Sekunden"
+            if t == "wait_until":
+                return "warte bis (Bedingung)"
+            if t == "repeat":
+                return f"wiederhole {self._describe(stmt.get('count'))}×"
+            if t == "log":
+                return "Log-Eintrag"
+            if t == "notify":
+                return f"benachrichtige {stmt.get('service')}"
+            if t == "fire_event":
+                return f"Event {stmt.get('event_type')}"
+            if t == "stop":
+                return "Ablauf beenden"
+        except Exception:  # noqa: BLE001
+            pass
+        return str(t)
+
+    def _describe(self, value) -> str:
+        if isinstance(value, dict):
+            if value.get("type") == "const":
+                return str(value.get("value"))
+            if value.get("type") == "state":
+                return f"Zustand {value.get('entity')}"
+            if value.get("type") == "var":
+                return str(value.get("name"))
+            return value.get("type", "?")
+        return str(value)
 
     async def _do_service(self, stmt: dict, variables: dict, ctx: dict) -> None:
         delay = self._eval(stmt.get("delay"), variables, ctx)

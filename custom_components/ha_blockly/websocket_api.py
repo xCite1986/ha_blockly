@@ -25,6 +25,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_delete)
     websocket_api.async_register_command(hass, ws_set_enabled)
     websocket_api.async_register_command(hass, ws_run)
+    websocket_api.async_register_command(hass, ws_get_traces)
     websocket_api.async_register_command(hass, ws_reload)
     websocket_api.async_register_command(hass, ws_folder_create)
     websocket_api.async_register_command(hass, ws_folder_rename)
@@ -105,8 +106,20 @@ async def ws_set_enabled(hass, connection, msg) -> None:
 @websocket_api.async_response
 async def ws_run(hass, connection, msg) -> None:
     _, engine = _ctx(hass)
-    ok = await engine.async_run_rule(msg["rule_id"])
-    connection.send_result(msg["id"], {"success": ok})
+    trace = await engine.async_run_rule(msg["rule_id"])
+    if trace is None:
+        connection.send_error(msg["id"], "not_found", "Rule not found")
+        return
+    connection.send_result(msg["id"], {"success": True, "trace": trace})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "ha_blockly/get_traces", vol.Required("rule_id"): str}
+)
+@websocket_api.async_response
+async def ws_get_traces(hass, connection, msg) -> None:
+    _, engine = _ctx(hass)
+    connection.send_result(msg["id"], {"traces": engine.get_traces(msg["rule_id"])})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "ha_blockly/reload"})

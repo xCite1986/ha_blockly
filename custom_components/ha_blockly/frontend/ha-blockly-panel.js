@@ -102,6 +102,35 @@ const STYLES = `
 .hab-root[data-theme="dark"] .hab-status{color:#9e9e9e;}
 .hab-root[data-theme="dark"] .hab-toolbar input,.hab-root[data-theme="dark"] .hab-toolbar select{background:#333;color:#e0e0e0;}
 .hab-root[data-theme="dark"] .blocklyToolboxCategoryLabel,.hab-root[data-theme="dark"] .blocklyTreeLabel{color:#e0e0e0!important;}
+/* Execution trace + log panel */
+.hab-trace{display:flex;flex-direction:column;height:220px;flex:none;
+  border-top:1px solid var(--divider-color,#e0e0e0);background:var(--card-background-color,#fff);overflow:hidden;}
+.hab-trace.collapsed{height:34px;}
+.hab-trace-head{display:flex;align-items:center;gap:10px;padding:6px 12px;cursor:pointer;
+  font-size:13px;font-weight:500;background:var(--secondary-background-color,#f2f2f2);user-select:none;}
+.hab-trace-head .sp{flex:1;}
+.hab-trace-head .hab-btn{background:rgba(0,0,0,.08);color:inherit;padding:4px 8px;font-size:12px;}
+.hab-trace-body{flex:1;display:flex;min-height:0;}
+.hab-trace-tl{width:46%;overflow:auto;padding:8px 12px;border-right:1px solid var(--divider-color,#e0e0e0);}
+.hab-trace-log{flex:1;overflow:auto;padding:8px 12px;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.5;}
+.hab-step{display:flex;gap:9px;align-items:flex-start;padding:3px 0;font-size:13px;}
+.hab-step .lbl{flex:1;}
+.hab-dot{width:10px;height:10px;border-radius:50%;margin-top:4px;flex:none;background:#9e9e9e;}
+.hab-dot.ok{background:#43a047;}
+.hab-dot.error{background:#e53935;}
+.hab-dot.stopped{background:#fb8c00;}
+.hab-dot.trigger{background:#039be5;}
+.hab-step .meta{color:var(--secondary-text-color,#888);font-size:11px;}
+.hab-trace-empty{color:var(--secondary-text-color,#888);font-size:13px;padding:8px;}
+.hab-log-line{white-space:pre-wrap;}
+.hab-log-line.error{color:#e53935;}
+.hab-log-line.stopped{color:#fb8c00;}
+.hab-log-line.head{font-weight:600;margin-top:4px;}
+.hab-root[data-theme="dark"] .hab-trace{background:#252525;border-top-color:#333;}
+.hab-root[data-theme="dark"] .hab-trace-head{background:#2f2f2f;}
+.hab-root[data-theme="dark"] .hab-trace-head .hab-btn{background:rgba(255,255,255,.1);}
+.hab-root[data-theme="dark"] .hab-trace-tl{border-right-color:#333;}
+.hab-root[data-theme="dark"] .hab-trace,.hab-root[data-theme="dark"] .hab-trace-log{color:#e0e0e0;}
 `;
 
 class HaBlocklyPanel extends HTMLElement {
@@ -166,6 +195,21 @@ class HaBlocklyPanel extends HTMLElement {
             </div>
           </div>
         </div>
+        <div class="hab-trace collapsed" id="hab-trace">
+          <div class="hab-trace-head" id="hab-trace-head">
+            <span id="hab-trace-caret">▸</span>
+            <span>Ausführung &amp; Protokoll</span>
+            <span class="sp"></span>
+            <button class="hab-btn" id="hab-trace-refresh">Aktualisieren</button>
+            <button class="hab-btn" id="hab-trace-clear">Log leeren</button>
+          </div>
+          <div class="hab-trace-body">
+            <div class="hab-trace-tl" id="hab-trace-tl">
+              <div class="hab-trace-empty">Noch keine Ausführung. „Test ▶" ausführen oder auf einen Auslöser warten.</div>
+            </div>
+            <div class="hab-trace-log" id="hab-trace-log"></div>
+          </div>
+        </div>
       </div>`;
 
     this._q("#hab-save").onclick = () => this._save();
@@ -176,6 +220,19 @@ class HaBlocklyPanel extends HTMLElement {
     this._q("#hab-newfolder").onclick = () => this._createFolder();
     this._q("#hab-refresh").onclick = () => this._loadData();
     this._q("#hab-ai-go").onclick = () => this._aiGenerate();
+    this._q("#hab-trace-head").onclick = (e) => {
+      if (e.target.tagName === "BUTTON") return;
+      this._toggleTrace();
+    };
+    this._q("#hab-trace-refresh").onclick = (e) => {
+      e.stopPropagation();
+      this._loadTraces();
+    };
+    this._q("#hab-trace-clear").onclick = (e) => {
+      e.stopPropagation();
+      this._q("#hab-trace-log").innerHTML = "";
+    };
+    this._traceOpen = false;
 
     this._setupAutocomplete();
 
@@ -503,6 +560,7 @@ class HaBlocklyPanel extends HTMLElement {
         this._workspace.clear();
       }
       this._renderTree();
+      this._loadTraces();
       this._status(`Regel „${rule.name}" geladen.`);
     } catch (err) {
       this._status("Konnte Regel nicht laden: " + err.message, true);
@@ -514,6 +572,7 @@ class HaBlocklyPanel extends HTMLElement {
     this._q("#hab-name").value = "";
     this._workspace.clear();
     this._renderTree();
+    this._renderTrace(null);
     this._status("Neue Regel. Baue Blöcke und speichere.");
   }
 
@@ -598,11 +657,108 @@ class HaBlocklyPanel extends HTMLElement {
       return;
     }
     try {
-      await this._ws({ type: "ha_blockly/run", rule_id: this._currentId });
-      this._status("Regel testweise ausgeführt (Aktionen, Auslöser übersprungen).");
+      const res = await this._ws({ type: "ha_blockly/run", rule_id: this._currentId });
+      if (res && res.trace) {
+        this._showTrace();
+        this._renderTrace(res.trace);
+        this._logTrace(res.trace);
+      }
+      this._status('Testlauf ausgeführt – siehe „Ausführung & Protokoll" unten.');
     } catch (err) {
       this._status("Testlauf fehlgeschlagen: " + err.message, true);
     }
+  }
+
+  // --- Trace / log ------------------------------------------------------
+
+  _toggleTrace() {
+    this._traceOpen = !this._traceOpen;
+    const el = this._q("#hab-trace");
+    const caret = this._q("#hab-trace-caret");
+    if (el) el.classList.toggle("collapsed", !this._traceOpen);
+    if (caret) caret.textContent = this._traceOpen ? "▾" : "▸";
+    if (this._workspace && this._Blockly) {
+      setTimeout(() => this._Blockly.svgResize(this._workspace), 160);
+    }
+  }
+
+  _showTrace() {
+    if (!this._traceOpen) this._toggleTrace();
+  }
+
+  _statusDot(status, kind) {
+    const cls = kind === "trigger" ? "trigger" : status;
+    return `<span class="hab-dot ${cls || ""}"></span>`;
+  }
+
+  _fmtTime(iso) {
+    try {
+      return new Date(iso).toLocaleTimeString();
+    } catch (e) {
+      return iso || "";
+    }
+  }
+
+  _renderTrace(trace) {
+    const tl = this._q("#hab-trace-tl");
+    if (!tl) return;
+    if (!trace) {
+      tl.innerHTML = '<div class="hab-trace-empty">Keine Ausführung.</div>';
+      return;
+    }
+    const statusText = { ok: "erfolgreich", error: "Fehler", stopped: "abgebrochen" }[trace.status] || trace.status;
+    let html = `<div class="hab-log-line head">${trace.test ? "Test" : "Auslösung"} · ${this._fmtTime(trace.started)} · ${statusText} · ${trace.duration ?? "?"}s</div>`;
+    for (const s of trace.steps || []) {
+      const meta = s.detail ? `<div class="meta">${this._esc(s.detail)}</div>` : "";
+      html += `<div class="hab-step">${this._statusDot(s.status, s.kind)}<div class="lbl">${this._esc(s.label)}${meta}</div><div class="meta">${this._fmtTime(s.t)}</div></div>`;
+    }
+    if (trace.error) {
+      html += `<div class="hab-log-line error">Fehler: ${this._esc(trace.error)}</div>`;
+    }
+    tl.innerHTML = html;
+  }
+
+  _logTrace(trace) {
+    const log = this._q("#hab-trace-log");
+    if (!log || !trace) return;
+    const statusText = { ok: "OK", error: "FEHLER", stopped: "ABGEBROCHEN" }[trace.status] || trace.status;
+    const head = document.createElement("div");
+    head.className = "hab-log-line head " + (trace.status === "ok" ? "" : trace.status);
+    head.textContent = `${this._fmtTime(trace.started)}  ${trace.test ? "[TEST] " : ""}${trace.name} — ${statusText} (${(trace.steps || []).length - 1} Aktionen, ${trace.duration ?? "?"}s)`;
+    log.appendChild(head);
+    for (const s of trace.steps || []) {
+      if (s.kind === "trigger") continue;
+      const line = document.createElement("div");
+      line.className = "hab-log-line " + (s.status === "ok" ? "" : s.status);
+      line.textContent = `   • ${s.label}${s.detail ? " — " + s.detail : ""}  [${s.status}]`;
+      log.appendChild(line);
+    }
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async _loadTraces() {
+    if (!this._currentId) {
+      this._renderTrace(null);
+      return;
+    }
+    try {
+      const res = await this._ws({ type: "ha_blockly/get_traces", rule_id: this._currentId });
+      const traces = (res && res.traces) || [];
+      if (!traces.length) {
+        this._q("#hab-trace-tl").innerHTML = '<div class="hab-trace-empty">Noch keine Ausführung für diese Regel.</div>';
+        return;
+      }
+      this._renderTrace(traces[0]);
+      const log = this._q("#hab-trace-log");
+      log.innerHTML = "";
+      for (const t of [...traces].reverse()) this._logTrace(t);
+    } catch (err) {
+      this._status("Protokoll konnte nicht geladen werden: " + err.message, true);
+    }
+  }
+
+  _esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
   }
 
   async _reloadEngine() {
