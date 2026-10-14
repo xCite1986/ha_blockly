@@ -67,6 +67,8 @@ const STYLES = `
 .hab-ai .row{display:flex;gap:8px;margin-top:8px;align-items:center;}
 .hab-ai select{flex:1;padding:6px;border-radius:6px;}
 .hab-ai .hab-btn{background:var(--primary-color,#03a9f4);color:#fff;}
+.hab-ai-status{font-size:12px;color:var(--secondary-text-color,#888);margin-top:8px;min-height:16px;
+  white-space:pre-wrap;line-height:1.45;}
 .hab-status{font-size:12px;color:var(--secondary-text-color,#727272);padding:4px 12px;min-height:16px;}
 .hab-empty{padding:16px;color:var(--secondary-text-color,#888);font-size:13px;}
 .hab-btn.hab-theme{margin-left:auto;font-size:16px;line-height:1;padding:6px 10px;}
@@ -192,6 +194,7 @@ class HaBlocklyPanel extends HTMLElement {
                 <select id="hab-ai-agent"><option value="">Standard-Agent</option></select>
                 <button class="hab-btn" id="hab-ai-go">Generieren</button>
               </div>
+              <div class="hab-ai-status" id="hab-ai-status"></div>
             </div>
           </div>
         </div>
@@ -841,28 +844,47 @@ class HaBlocklyPanel extends HTMLElement {
 
   // --- AI editor --------------------------------------------------------
 
+  _aiStatus(msg, isError) {
+    const el = this._q("#hab-ai-status");
+    if (el) {
+      el.textContent = msg || "";
+      el.style.color = isError ? "var(--error-color,#db4437)" : "";
+    }
+  }
+
   async _aiGenerate() {
     const prompt = this._q("#hab-ai-prompt").value.trim();
     if (!prompt) {
-      this._status("Bitte zuerst eine Beschreibung eingeben.", true);
+      this._aiStatus("Bitte zuerst eine Beschreibung eingeben.", true);
       return;
     }
-    const agent_id = this._q("#hab-ai-agent").value || null;
-    this._status("KI generiert Blöcke …");
+    const sel = this._q("#hab-ai-agent");
+    const agent_id = sel.value || null;
+    const agentName =
+      sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : "Standard-Agent";
     this._q("#hab-ai-go").disabled = true;
+    this._aiStatus('⏳ Sende Anfrage an „' + agentName + '" …');
     try {
       const res = await this._ws({ type: "ha_blockly/ai_generate", prompt, agent_id });
       if (res.error) {
-        this._status("KI-Fehler: " + res.error, true);
+        let msg = "⚠ " + res.error;
+        if (res.raw) msg += "\nAntwort des Agenten: " + String(res.raw).slice(0, 220);
+        if (!agent_id) {
+          msg += "\nTipp: Oben einen LLM-Agent wählen (z. B. ChatGPT, Gemini, Ollama) – der Standard-Agent liefert oft kein JSON.";
+        }
+        this._aiStatus(msg, true);
         return;
       }
+      this._aiStatus("✓ Antwort erhalten – Blöcke werden erstellt …");
       const ir = res.ir;
       buildFromIR(this._workspace, ir, this._Blockly);
       if (ir.name) this._q("#hab-name").value = ir.name;
       this._currentId = null;
-      this._status('KI-Vorschlag erstellt. Prüfen und „Speichern" klicken.');
+      const nt = (ir.triggers || []).length;
+      const na = (ir.actions || []).length;
+      this._aiStatus(`✓ Fertig: ${nt} Auslöser, ${na} Aktionen. Prüfen und „Speichern" klicken.`);
     } catch (err) {
-      this._status("KI-Anfrage fehlgeschlagen: " + err.message, true);
+      this._aiStatus("⚠ KI-Anfrage fehlgeschlagen: " + err.message, true);
     } finally {
       this._q("#hab-ai-go").disabled = false;
     }
