@@ -255,6 +255,11 @@ class HaBlocklyPanel extends HTMLElement {
       if (this._Blockly) this._Blockly.svgResize(this._workspace);
     }
     try {
+      window.__haBlocklyTheme = this._theme;
+    } catch (e) {
+      /* ignore */
+    }
+    try {
       localStorage.setItem("ha_blockly_theme", this._theme);
     } catch (e) {
       /* ignore */
@@ -284,6 +289,11 @@ class HaBlocklyPanel extends HTMLElement {
         const out = [];
         for (const d in svc) for (const s in svc[d]) out.push(d + "." + s);
         return out.sort();
+      },
+      friendlyName: (entityId) => {
+        const h = getHass();
+        const st = h && h.states && h.states[entityId];
+        return st && st.attributes ? st.attributes.friendly_name || "" : "";
       },
     };
   }

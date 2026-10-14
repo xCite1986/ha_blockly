@@ -4,8 +4,36 @@
 // A text field with a native, searchable <datalist> of Home Assistant
 // entities / domains / services. Free text is still allowed. Options come from
 // window.__haBlockly, which the panel keeps in sync with the live hass object.
+function injectSearchFieldCss() {
+  if (document.getElementById("hab-fs-style")) return;
+  const st = document.createElement("style");
+  st.id = "hab-fs-style";
+  st.textContent = `
+.hab-fs{display:flex;flex-direction:column;width:320px;max-width:92vw;
+  font-family:Roboto,Arial,sans-serif;}
+.hab-fs-search{padding:9px 11px;border:none;border-bottom:1px solid #e0e0e0;
+  font-size:14px;outline:none;width:100%;box-sizing:border-box;background:#fff;color:#212121;}
+.hab-fs-list{max-height:280px;overflow:auto;}
+.hab-fs-item{padding:8px 11px;font-size:13px;cursor:pointer;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;color:#212121;}
+.hab-fs-item:hover,.hab-fs-item.sel{background:#e8f0fe;}
+.hab-fs-item .sub{color:#888;font-size:11px;margin-left:6px;}
+.hab-fs-empty{padding:12px;color:#888;font-size:13px;}
+.hab-fs.dark .hab-fs-search{background:#1e1e1e;color:#e0e0e0;border-bottom-color:#444;}
+.hab-fs.dark .hab-fs-item{color:#e0e0e0;}
+.hab-fs.dark .hab-fs-item:hover,.hab-fs.dark .hab-fs-item.sel{background:#3a3a3a;}
+.hab-fs.dark .hab-fs-empty{color:#999;}
+`;
+  document.head.appendChild(st);
+}
+
+// A searchable picker field: clicking opens a dropdown (anchored to the block)
+// with a search box and a filtered, scrollable list of Home Assistant
+// entities / domains / services. Free text is still allowed (Enter accepts it).
 function defineSearchField(Blockly) {
   if (Blockly.__haFieldSearch) return;
+  injectSearchFieldCss();
+
   class FieldSearch extends Blockly.FieldTextInput {
     constructor(value, variant, validator) {
       super(value == null ? "" : value, validator);
@@ -28,33 +56,93 @@ function defineSearchField(Blockly) {
         return [];
       }
     }
-    widgetCreate_() {
-      const input = super.widgetCreate_();
+    _friendly(id) {
+      const api = window.__haBlockly || {};
       try {
-        const dl = document.createElement("datalist");
-        dl.id = "hab-dl-" + Math.random().toString(36).slice(2);
-        for (const o of this._options()) {
-          const op = document.createElement("option");
-          op.value = o;
-          dl.appendChild(op);
-        }
-        document.body.appendChild(dl);
-        input.setAttribute("list", dl.id);
-        input.setAttribute("autocomplete", "off");
-        this._dl_ = dl;
+        return api.friendlyName ? api.friendlyName(id) : "";
       } catch (e) {
-        /* ignore */
+        return "";
       }
-      return input;
     }
-    widgetDispose_() {
-      super.widgetDispose_();
-      if (this._dl_) {
-        this._dl_.remove();
-        this._dl_ = null;
-      }
+    // Open a searchable dropdown instead of the plain text editor.
+    showEditor_(e) {
+      const DD = Blockly.DropDownDiv;
+      const dark = window.__haBlocklyTheme === "dark";
+      const content = DD.getContentDiv();
+      content.innerHTML = "";
+
+      const wrap = document.createElement("div");
+      wrap.className = "hab-fs" + (dark ? " dark" : "");
+      const search = document.createElement("input");
+      search.type = "text";
+      search.className = "hab-fs-search";
+      search.placeholder = "Suchen…";
+      search.value = "";
+      const list = document.createElement("div");
+      list.className = "hab-fs-list";
+      wrap.appendChild(search);
+      wrap.appendChild(list);
+      content.appendChild(wrap);
+
+      const options = this._options();
+      const commit = (val) => {
+        this.setValue(val);
+        DD.hideIfOwner(this);
+      };
+      const render = (q) => {
+        list.innerHTML = "";
+        const ql = (q || "").toLowerCase();
+        const matches = [];
+        for (const o of options) {
+          const fn = this.variant_ === "entity" ? this._friendly(o) : "";
+          if (!ql || o.toLowerCase().includes(ql) || (fn && fn.toLowerCase().includes(ql))) {
+            matches.push([o, fn]);
+            if (matches.length >= 300) break;
+          }
+        }
+        if (!matches.length) {
+          const em = document.createElement("div");
+          em.className = "hab-fs-empty";
+          em.textContent = q ? `Keine Treffer – Enter übernimmt „${q}"` : "Keine Einträge";
+          list.appendChild(em);
+          return;
+        }
+        for (const [o, fn] of matches) {
+          const item = document.createElement("div");
+          item.className = "hab-fs-item";
+          item.textContent = o;
+          if (fn) {
+            const sub = document.createElement("span");
+            sub.className = "sub";
+            sub.textContent = fn;
+            item.appendChild(sub);
+          }
+          item.addEventListener("mousedown", (ev) => {
+            ev.preventDefault();
+            commit(o);
+          });
+          list.appendChild(item);
+        }
+      };
+      render("");
+      search.addEventListener("input", () => render(search.value));
+      search.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          const first = list.querySelector(".hab-fs-item");
+          if (first) commit(first.firstChild.textContent);
+          else if (search.value) commit(search.value);
+        } else if (ev.key === "Escape") {
+          DD.hideIfOwner(this);
+        }
+      });
+
+      DD.setColour(dark ? "#2b2b2b" : "#ffffff", dark ? "#444444" : "#cccccc");
+      DD.showPositionedByField(this, () => {});
+      setTimeout(() => search.focus(), 0);
     }
   }
+
   Blockly.fieldRegistry.register("field_search", FieldSearch);
   Blockly.__haFieldSearch = true;
 }
