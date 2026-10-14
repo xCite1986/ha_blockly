@@ -58,6 +58,9 @@ function defineSearchField(Blockly) {
           const ent = block ? block.getFieldValue("ENTITY") : null;
           return api.stateOptions ? api.stateOptions(ent) : [];
         }
+        if (this.variant_ === "notify") {
+          return api.notifyServices ? api.notifyServices() : ["notify.notify"];
+        }
         return api.entities ? api.entities() : [];
       } catch (e) {
         return [];
@@ -321,7 +324,7 @@ export function defineBlocks(Blockly) {
     {
       type: "ha_notify",
       message0: "benachrichtige %1",
-      args0: [{ type: "field_input", name: "SERVICE", text: "notify.notify" }],
+      args0: [{ type: "field_search", name: "SERVICE", text: "notify.notify", variant: "notify" }],
       message1: "Nachricht %1",
       args1: [{ type: "input_value", name: "MESSAGE" }],
       message2: "Titel %1",

@@ -302,6 +302,12 @@ class HaBlocklyPanel extends HTMLElement {
         const st = h && h.states && h.states[entityId];
         return st && st.attributes ? st.attributes.friendly_name || "" : "";
       },
+      notifyServices: () => {
+        const h = getHass();
+        const svc = (h && h.services && h.services.notify) || {};
+        const out = Object.keys(svc).map((s) => "notify." + s).sort();
+        return out.length ? out : ["notify.notify"];
+      },
       stateOptions: (entityId) => {
         const h = getHass();
         if (!entityId) return [];
