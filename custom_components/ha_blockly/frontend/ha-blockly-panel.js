@@ -69,6 +69,22 @@ const STYLES = `
 .hab-ai .hab-btn{background:var(--primary-color,#03a9f4);color:#fff;}
 .hab-status{font-size:12px;color:var(--secondary-text-color,#727272);padding:4px 12px;min-height:16px;}
 .hab-empty{padding:16px;color:var(--secondary-text-color,#888);font-size:13px;}
+.hab-btn.hab-theme{margin-left:auto;font-size:16px;line-height:1;padding:6px 10px;}
+/* Toolbox category labels: force legibility inside the HA shadow root */
+.hab-root .blocklyToolboxCategoryLabel,.hab-root .blocklyTreeLabel{
+  color:var(--primary-text-color,#111)!important;font-size:14px!important;vertical-align:middle;}
+/* Dark mode */
+.hab-root[data-theme="dark"]{background:#1e1e1e;color:#e0e0e0;}
+.hab-root[data-theme="dark"] .hab-side{background:#252525;border-left-color:#333;}
+.hab-root[data-theme="dark"] .hab-side h3{color:#9e9e9e;}
+.hab-root[data-theme="dark"] .hab-side-actions .hab-btn{background:#333;color:#e0e0e0;}
+.hab-root[data-theme="dark"] .hab-tree,.hab-root[data-theme="dark"] .hab-folder{color:#e0e0e0;}
+.hab-root[data-theme="dark"] .hab-rule:hover{background:#333;}
+.hab-root[data-theme="dark"] .hab-ai{border-top-color:#333;}
+.hab-root[data-theme="dark"] .hab-ai textarea{background:#1e1e1e;color:#e0e0e0;border-color:#444;}
+.hab-root[data-theme="dark"] .hab-status{color:#9e9e9e;}
+.hab-root[data-theme="dark"] .hab-toolbar input,.hab-root[data-theme="dark"] .hab-toolbar select{background:#333;color:#e0e0e0;}
+.hab-root[data-theme="dark"] .blocklyToolboxCategoryLabel,.hab-root[data-theme="dark"] .blocklyTreeLabel{color:#e0e0e0!important;}
 `;
 
 class HaBlocklyPanel extends HTMLElement {
@@ -111,6 +127,7 @@ class HaBlocklyPanel extends HTMLElement {
           <button class="hab-btn" id="hab-new">Neu</button>
           <button class="hab-btn" id="hab-run">Test ▶</button>
           <button class="hab-btn" id="hab-reload">Engine neu laden</button>
+          <button class="hab-btn hab-theme" id="hab-theme" title="Hell / Dunkel umschalten">🌙</button>
         </div>
         <div class="hab-status" id="hab-status"></div>
         <div class="hab-body">
@@ -138,6 +155,7 @@ class HaBlocklyPanel extends HTMLElement {
     this._q("#hab-new").onclick = () => this._newRule();
     this._q("#hab-run").onclick = () => this._runCurrent();
     this._q("#hab-reload").onclick = () => this._reloadEngine();
+    this._q("#hab-theme").onclick = () => this._toggleTheme();
     this._q("#hab-newfolder").onclick = () => this._createFolder();
     this._q("#hab-refresh").onclick = () => this._loadData();
     this._q("#hab-ai-go").onclick = () => this._aiGenerate();
@@ -161,6 +179,35 @@ class HaBlocklyPanel extends HTMLElement {
       // node so the toolbox categories and block flyout are styled/visible.
       this._injectBlocklyStyles();
       Blockly.svgResize(this._workspace);
+
+      // Light/dark Blockly themes for the sun/moon toggle.
+      this._themes = {
+        light: Blockly.Themes.Classic,
+        dark: Blockly.Theme.defineTheme("habDark", {
+          name: "habDark",
+          base: Blockly.Themes.Classic,
+          componentStyles: {
+            workspaceBackgroundColour: "#1e1e1e",
+            toolboxBackgroundColour: "#2b2b2b",
+            toolboxForegroundColour: "#e0e0e0",
+            flyoutBackgroundColour: "#262626",
+            flyoutForegroundColour: "#e0e0e0",
+            flyoutOpacity: 1,
+            scrollbarColour: "#555555",
+            scrollbarOpacity: 0.6,
+            insertionMarkerColour: "#ffffff",
+            insertionMarkerOpacity: 0.3,
+          },
+        }),
+      };
+      let saved = "light";
+      try {
+        saved = localStorage.getItem("ha_blockly_theme") || "light";
+      } catch (e) {
+        /* ignore */
+      }
+      this._applyTheme(saved);
+
       const ro = new ResizeObserver(() => Blockly.svgResize(this._workspace));
       ro.observe(this._q("#hab-blockly"));
     } catch (err) {
@@ -174,6 +221,27 @@ class HaBlocklyPanel extends HTMLElement {
 
   _q(sel) {
     return this.querySelector(sel);
+  }
+
+  _applyTheme(mode) {
+    this._theme = mode === "dark" ? "dark" : "light";
+    const root = this._q(".hab-root");
+    if (root) root.dataset.theme = this._theme;
+    const btn = this._q("#hab-theme");
+    if (btn) btn.textContent = this._theme === "dark" ? "☀️" : "🌙";
+    if (this._workspace && this._themes) {
+      this._workspace.setTheme(this._themes[this._theme] || this._themes.light);
+      if (this._Blockly) this._Blockly.svgResize(this._workspace);
+    }
+    try {
+      localStorage.setItem("ha_blockly_theme", this._theme);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  _toggleTheme() {
+    this._applyTheme(this._theme === "dark" ? "light" : "dark");
   }
 
   _setupAutocomplete() {
@@ -490,4 +558,6 @@ class HaBlocklyPanel extends HTMLElement {
   }
 }
 
-customElements.define("ha-blockly-panel", HaBlocklyPanel);
+if (!customElements.get("ha-blockly-panel")) {
+  customElements.define("ha-blockly-panel", HaBlocklyPanel);
+}
