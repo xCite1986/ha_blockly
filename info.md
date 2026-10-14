@@ -1,3 +1,5 @@
+<img src="icon.svg" width="96" align="right" alt="" />
+
 # HA Blockly Automations
 
 Visueller Automatisierungs-Editor für Home Assistant auf Basis von Blockly –

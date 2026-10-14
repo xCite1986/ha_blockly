@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="HA Blockly Automations">
+  <defs>
+    <linearGradient id="hab-grad" x1="96" y1="96" x2="416" y2="416" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5969A4"/>
+      <stop offset="0.38" stop-color="#52A58C"/>
+      <stop offset="0.68" stop-color="#A4A96A"/>
+      <stop offset="1" stop-color="#A06594"/>
+    </linearGradient>
+    <linearGradient id="hab-gloss" x1="256" y1="96" x2="256" y2="416" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.12"/>
+    </linearGradient>
+    <filter id="hab-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <g filter="url(#hab-shadow)">
+    <path id="hab-piece" d="M178,160
+      L216,160 C216,96 296,96 296,160 L334,160
+      A18,18 0 0 1 352,178
+      L352,216 C416,216 416,296 352,296 L352,334
+      A18,18 0 0 1 334,352
+      L296,352 C296,416 216,416 216,352 L178,352
+      A18,18 0 0 1 160,334
+      L160,296 C96,296 96,216 160,216 L160,178
+      A18,18 0 0 1 178,160 Z"
+      fill="url(#hab-grad)" stroke="#2b2f45" stroke-width="10" stroke-linejoin="round"/>
+    <use href="#hab-piece" fill="url(#hab-gloss)" stroke="none"/>
+  </g>
+  <!-- little studs to echo the puzzle/block feel -->
+  <circle cx="226" cy="236" r="12" fill="#ffffff" fill-opacity="0.55"/>
+  <circle cx="286" cy="236" r="12" fill="#ffffff" fill-opacity="0.3"/>
+</svg>

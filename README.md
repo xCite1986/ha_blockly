@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="icon.svg" width="140" alt="HA Blockly Automations" />
+</p>
+
 # HA Blockly Automations
 
 Ein visueller Automatisierungs-Editor für **Home Assistant** auf Basis von
@@ -7,8 +11,6 @@ Eintrag **„Blockly“ in der linken Seitenleiste**, speichert Regeln in einer
 **Ordnerstruktur auf der rechten Seite** und bringt einen **KI-Editor** mit,
 der aus einer Texteingabe über die in Home Assistant eingebundenen
 LLM-/Konversationsagenten ein fertiges Blockly-Setup erzeugt.
-
-![Blockly in ioBroker – Vorbild für den Editor](https://developers.google.com/blockly/images/logos/logo_knockout.png)
 
 ## Funktionen
 
