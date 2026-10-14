@@ -248,6 +248,8 @@ function compileValue(block) {
       return { type: "const", value: field(block, "TEXT") };
     case "ha_bool":
       return { type: "const", value: field(block, "BOOL") === "true" };
+    case "ha_state_value":
+      return { type: "const", value: field(block, "VALUE") };
     case "ha_math":
       return {
         type: "math",

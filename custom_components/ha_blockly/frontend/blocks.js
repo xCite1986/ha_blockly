@@ -29,6 +29,22 @@ function injectSearchFieldCss() {
   document.head.appendChild(st);
 }
 
+// Find the entity_id of a sibling "Zustand von" (ha_state) block within the
+// same comparison/logic parent, so a value field can offer matching states.
+function compareEntity(block) {
+  if (!block || !block.getParent) return null;
+  const parent = block.getParent();
+  if (!parent || !parent.inputList) return null;
+  for (const input of parent.inputList) {
+    const conn = input.connection;
+    const t = conn && conn.targetBlock && conn.targetBlock();
+    if (t && t.type === "ha_state") {
+      return t.getFieldValue("ENTITY");
+    }
+  }
+  return null;
+}
+
 // A searchable picker field: clicking opens a dropdown (anchored to the block)
 // with a search box and a filtered, scrollable list of Home Assistant
 // entities / domains / services. Free text is still allowed (Enter accepts it).
@@ -56,6 +72,11 @@ function defineSearchField(Blockly) {
         if (this.variant_ === "state") {
           const block = this.getSourceBlock && this.getSourceBlock();
           const ent = block ? block.getFieldValue("ENTITY") : null;
+          return api.stateOptions ? api.stateOptions(ent) : [];
+        }
+        if (this.variant_ === "cmpstate") {
+          const block = this.getSourceBlock && this.getSourceBlock();
+          const ent = compareEntity(block);
           return api.stateOptions ? api.stateOptions(ent) : [];
         }
         if (this.variant_ === "notify") {
@@ -444,6 +465,15 @@ export function defineBlocks(Blockly) {
       tooltip: "Ein Wahrheitswert.",
     },
     {
+      type: "ha_state_value",
+      message0: "Zustandswert %1",
+      args0: [{ type: "field_search", name: "VALUE", text: "on", variant: "cmpstate" }],
+      output: null,
+      colour: C_VALUE,
+      tooltip:
+        "Ein Zustandswert für den Vergleich – die Auswahlliste richtet sich nach der Entität im „Zustand von\"-Block auf der anderen Seite.",
+    },
+    {
       type: "ha_math",
       message0: "%1 %2 %3",
       args0: [
@@ -699,6 +729,7 @@ export const TOOLBOX = {
       colour: "#A4A96A",
       contents: [
         { kind: "block", type: "ha_state" },
+        { kind: "block", type: "ha_state_value" },
         { kind: "block", type: "ha_trigger_value" },
         { kind: "block", type: "ha_number" },
         { kind: "block", type: "ha_text" },
