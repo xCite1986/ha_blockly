@@ -361,8 +361,16 @@ class HaBlocklyPanel extends HTMLElement {
       },
       notifyServices: () => {
         const h = getHass();
+        const set = new Set();
         const svc = (h && h.services && h.services.notify) || {};
-        const out = Object.keys(svc).map((s) => "notify." + s).sort();
+        for (const s of Object.keys(svc)) {
+          if (s !== "send_message" && s !== "persistent_notification") set.add("notify." + s);
+        }
+        // Modern notify entities (Alexa devices, groups, …) usable via send_message.
+        if (h && h.states) {
+          for (const e of Object.keys(h.states)) if (e.startsWith("notify.")) set.add(e);
+        }
+        const out = [...set].sort();
         return out.length ? out : ["notify.notify"];
       },
       stateOptions: (entityId) => {

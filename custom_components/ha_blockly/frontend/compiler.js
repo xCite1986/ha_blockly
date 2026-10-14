@@ -2,19 +2,22 @@
 
 export function compileWorkspace(workspace) {
   const triggers = [];
-  let actions = [];
-  let actionsSet = false;
+  let actions = null;
   for (const block of workspace.getTopBlocks(true)) {
     if (block.disabled || !block.isEnabled()) continue;
     const t = compileTrigger(block);
-    if (!t) continue;
-    triggers.push(t.trigger);
-    if (!actionsSet) {
-      actions = compileStatements(block.getInputTargetBlock("DO"));
-      actionsSet = true;
+    if (t) {
+      triggers.push(t.trigger);
+      if (actions === null) {
+        actions = compileStatements(block.getInputTargetBlock("DO"));
+      }
+    } else if (actions === null && block.previousConnection) {
+      // An orphan action stack (no trigger attached) — use it as the actions
+      // so the rule can still be test-run. Add a trigger to run it for real.
+      actions = compileStatements(block);
     }
   }
-  return { version: 1, triggers, actions };
+  return { version: 1, triggers, actions: actions || [] };
 }
 
 function field(block, name) {

@@ -358,6 +358,8 @@ class BlocklyEngine:
 
     async def _run(self, rid: str, name: str, actions: list, ctx: dict, *, test: bool = False) -> dict:
         variables: dict[str, Any] = {}
+        # On a test run, call services blocking so errors surface in the trace.
+        ctx["_test"] = test
         start = dt_util.now()
         trig = ctx.get("trigger") or {}
         trace: dict[str, Any] = {
@@ -515,7 +517,7 @@ class BlocklyEngine:
         target = stmt.get("target") or {}
         if target.get("entity_id"):
             data["entity_id"] = target["entity_id"]
-        await self._hass.services.async_call(domain, service, data, blocking=False)
+        await self._hass.services.async_call(domain, service, data, blocking=bool(ctx.get("_test")))
 
     async def _do_set(self, stmt: dict, variables: dict, ctx: dict) -> None:
         """Set an entity to a state/value, picking the right service by domain."""
@@ -535,7 +537,7 @@ class BlocklyEngine:
             data = {"entity_id": entity}
             if extra:
                 data.update(extra)
-            await hass.services.async_call(dom, svc, data, blocking=False)
+            await hass.services.async_call(dom, svc, data, blocking=bool(ctx.get("_test")))
 
         try:
             num = float(sval)
@@ -614,13 +616,20 @@ class BlocklyEngine:
 
     async def _do_notify(self, stmt: dict, variables: dict, ctx: dict) -> None:
         service = stmt.get("service", "notify")
-        domain, _, svc = service.partition(".")
-        if not svc:
-            domain, svc = "notify", domain
+        blocking = bool(ctx.get("_test"))
         data: dict[str, Any] = {"message": str(self._eval(stmt.get("message"), variables, ctx))}
         if stmt.get("title") is not None:
             data["title"] = str(self._eval(stmt.get("title"), variables, ctx))
-        await self._hass.services.async_call(domain, svc, data, blocking=False)
+        # Modern notify entities (e.g. Alexa: notify.<device>_sprechen) are driven
+        # via notify.send_message with the entity_id, not a legacy notify.<name> call.
+        if service.startswith("notify.") and self._hass.states.get(service) is not None:
+            data["entity_id"] = service
+            await self._hass.services.async_call("notify", "send_message", data, blocking=blocking)
+            return
+        domain, _, svc = service.partition(".")
+        if not svc:
+            domain, svc = "notify", domain
+        await self._hass.services.async_call(domain, svc, data, blocking=blocking)
 
     def _eval_data(self, data: dict, variables: dict, ctx: dict) -> dict:
         out: dict[str, Any] = {}
