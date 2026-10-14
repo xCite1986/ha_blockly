@@ -37,8 +37,26 @@ const STYLES = `
 .hab-btn:hover{background:rgba(255,255,255,.3);}
 .hab-btn.primary{background:#fff;color:var(--primary-color,#03a9f4);font-weight:500;}
 .hab-body{display:flex;flex:1;min-height:0;}
-.hab-editor{flex:1;min-width:0;position:relative;}
+.hab-editor{flex:1;min-width:0;display:flex;}
+.hab-canvas{flex:1;min-width:0;position:relative;}
 #hab-blockly{position:absolute;inset:0;}
+/* Custom accordion toolbox */
+.hab-tbx{width:188px;flex:none;overflow:auto;background:var(--secondary-background-color,#f5f5f5);
+  border-right:1px solid var(--divider-color,#e0e0e0);}
+.hab-cat-head{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;
+  font-size:14px;font-weight:500;user-select:none;}
+.hab-cat-head:hover{background:rgba(0,0,0,.05);}
+.hab-cat-head .sw{width:4px;height:18px;border-radius:2px;flex:none;}
+.hab-cat-head .nm{flex:1;}
+.hab-cat-head .car{opacity:.55;font-size:11px;}
+.hab-cat-blocks{display:none;flex-direction:column;gap:6px;padding:2px 10px 10px 24px;}
+.hab-cat.open .hab-cat-blocks{display:flex;}
+.hab-chip{padding:6px 11px;border-radius:14px;color:#fff;font-size:12px;cursor:grab;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 2px rgba(0,0,0,.2);}
+.hab-chip:hover{filter:brightness(1.08);}
+.hab-chip:active{cursor:grabbing;}
+.hab-root[data-theme="dark"] .hab-tbx{background:#232323;border-right-color:#333;}
+.hab-root[data-theme="dark"] .hab-cat-head:hover{background:rgba(255,255,255,.06);}
 .hab-side{width:340px;max-width:45%;display:flex;flex-direction:column;
   border-left:1px solid var(--divider-color,#e0e0e0);
   background:var(--card-background-color,#fff);overflow:hidden;}
@@ -177,7 +195,10 @@ class HaBlocklyPanel extends HTMLElement {
         </div>
         <div class="hab-status" id="hab-status"></div>
         <div class="hab-body">
-          <div class="hab-editor"><div id="hab-blockly"></div></div>
+          <div class="hab-editor">
+            <div class="hab-tbx" id="hab-tbx"></div>
+            <div class="hab-canvas"><div id="hab-blockly"></div></div>
+          </div>
           <div class="hab-side">
             <h3>Regeln &amp; Ordner</h3>
             <div class="hab-side-actions">
@@ -240,7 +261,6 @@ class HaBlocklyPanel extends HTMLElement {
       const Blockly = await loadBlockly();
       defineBlocks(Blockly);
       this._workspace = Blockly.inject(this._q("#hab-blockly"), {
-        toolbox: TOOLBOX,
         renderer: "zelos",
         grid: { spacing: 22, length: 3, colour: "#ccc", snap: true },
         zoom: { controls: true, wheel: true, startScale: 0.9 },
@@ -248,6 +268,7 @@ class HaBlocklyPanel extends HTMLElement {
         move: { scrollbars: true, drag: true, wheel: true },
       });
       this._Blockly = Blockly;
+      this._buildToolbox();
       // Blockly injects its CSS into document.head, which does not cross the
       // shadow-DOM boundary of the HA panel. Clone those styles into our root
       // node so the toolbox categories and block flyout are styled/visible.
@@ -413,6 +434,103 @@ class HaBlocklyPanel extends HTMLElement {
         return opts;
       },
     };
+  }
+
+  _buildToolbox() {
+    const host = this._q("#hab-tbx");
+    if (!host) return;
+    host.innerHTML = "";
+    for (const cat of TOOLBOX.contents) {
+      if (cat.kind !== "category") continue;
+      const colour = cat.colour || "#888";
+      const wrap = document.createElement("div");
+      wrap.className = "hab-cat";
+      const head = document.createElement("div");
+      head.className = "hab-cat-head";
+      head.innerHTML =
+        `<span class="sw" style="background:${colour}"></span><span class="nm"></span><span class="car">▸</span>`;
+      head.querySelector(".nm").textContent = cat.name;
+      const body = document.createElement("div");
+      body.className = "hab-cat-blocks";
+      for (const item of cat.contents || []) {
+        if (item.kind !== "block") continue;
+        const chip = document.createElement("div");
+        chip.className = "hab-chip";
+        chip.style.background = colour;
+        chip.textContent = this._blockLabel(item.type);
+        chip.title = chip.textContent;
+        chip.draggable = true;
+        chip.addEventListener("dragstart", (e) => {
+          e.dataTransfer.setData("text/blocktype", item.type);
+          e.dataTransfer.effectAllowed = "copy";
+        });
+        chip.addEventListener("click", () => this._spawnBlock(item.type));
+        body.appendChild(chip);
+      }
+      head.addEventListener("click", () => {
+        const open = wrap.classList.contains("open");
+        host.querySelectorAll(".hab-cat.open").forEach((c) => {
+          c.classList.remove("open");
+          const car = c.querySelector(".car");
+          if (car) car.textContent = "▸";
+        });
+        if (!open) {
+          wrap.classList.add("open");
+          head.querySelector(".car").textContent = "▾";
+        }
+      });
+      wrap.appendChild(head);
+      wrap.appendChild(body);
+      host.appendChild(wrap);
+    }
+    const canvas = this._q("#hab-blockly");
+    if (canvas && !canvas._habDrop) {
+      canvas._habDrop = true;
+      canvas.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      });
+      canvas.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const type = e.dataTransfer.getData("text/blocktype");
+        if (type) this._spawnBlock(type, e.clientX, e.clientY);
+      });
+    }
+  }
+
+  _blockLabel(type) {
+    try {
+      if (!this._labelWs) this._labelWs = new this._Blockly.Workspace();
+      const b = this._labelWs.newBlock(type);
+      const s = b.toString(28);
+      b.dispose(false);
+      return s || type;
+    } catch (e) {
+      return type;
+    }
+  }
+
+  _spawnBlock(type, clientX, clientY) {
+    const B = this._Blockly;
+    const ws = this._workspace;
+    if (!B || !ws) return;
+    try {
+      const block = ws.newBlock(type);
+      block.initSvg();
+      block.render();
+      const el = this._q("#hab-blockly");
+      const rect = el.getBoundingClientRect();
+      const sx = clientX != null ? clientX : rect.left + Math.min(rect.width / 2, 260);
+      const sy = clientY != null ? clientY : rect.top + 80;
+      const origin = ws.getOriginOffsetInPixels();
+      const scale = ws.scale || 1;
+      const x = (sx - rect.left - origin.x) / scale;
+      const y = (sy - rect.top - origin.y) / scale;
+      block.moveTo(new B.utils.Coordinate(x, y));
+      if (block.select) block.select();
+    } catch (err) {
+      this._status("Block konnte nicht erstellt werden: " + err.message, true);
+    }
   }
 
   _injectBlocklyStyles() {
