@@ -22,7 +22,7 @@ function loadBlockly() {
 }
 
 const STYLES = `
-.hab-root{display:flex;flex-direction:column;height:100vh;box-sizing:border-box;
+.hab-root{display:flex;flex-direction:column;height:100vh;overflow:hidden;box-sizing:border-box;
   background:var(--primary-background-color,#fafafa);color:var(--primary-text-color,#212121);
   font-family:var(--paper-font-body1_-_font-family,Roboto,sans-serif);}
 .hab-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;flex-wrap:wrap;
