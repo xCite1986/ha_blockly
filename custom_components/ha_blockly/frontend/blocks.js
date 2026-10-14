@@ -23,6 +23,8 @@ function injectSearchFieldCss() {
 .hab-fs.dark .hab-fs-item{color:#e0e0e0;}
 .hab-fs.dark .hab-fs-item:hover,.hab-fs.dark .hab-fs-item.sel{background:#3a3a3a;}
 .hab-fs.dark .hab-fs-empty{color:#999;}
+/* Let only our inner list scroll, not Blockly's dropdown container (no scroll-in-scroll) */
+.blocklyDropDownContent{max-height:none!important;overflow:visible!important;}
 `;
   document.head.appendChild(st);
 }
