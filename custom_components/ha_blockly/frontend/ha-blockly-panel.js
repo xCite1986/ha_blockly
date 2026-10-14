@@ -584,10 +584,22 @@ class HaBlocklyPanel extends HTMLElement {
     this._status("Neue Regel. Baue Blöcke und speichere.");
   }
 
-  async _save() {
-    if (!this._workspace) return;
+  async _persist() {
+    // Compile the current workspace and store it. Returns { doc, ir }.
     const name = this._q("#hab-name").value.trim() || "Unbenannt";
     const folder = this._q("#hab-folder").value;
+    const ir = compileWorkspace(this._workspace);
+    const workspace = this._Blockly.serialization.workspaces.save(this._workspace);
+    const rule = { name, folder, workspace, ir };
+    if (this._currentId) rule.id = this._currentId;
+    const doc = await this._ws({ type: "ha_blockly/save", rule });
+    this._currentId = doc.id;
+    await this._loadData();
+    return { doc, ir };
+  }
+
+  async _save() {
+    if (!this._workspace) return;
     let ir;
     try {
       ir = compileWorkspace(this._workspace);
@@ -605,13 +617,8 @@ class HaBlocklyPanel extends HTMLElement {
         return;
       }
     }
-    const workspace = this._Blockly.serialization.workspaces.save(this._workspace);
-    const rule = { name, folder, workspace, ir };
-    if (this._currentId) rule.id = this._currentId;
     try {
-      const doc = await this._ws({ type: "ha_blockly/save", rule });
-      this._currentId = doc.id;
-      await this._loadData();
+      const { doc } = await this._persist();
       const warn = v.warnings.length ? "  ⚠ " + v.warnings.join("; ") : "";
       this._status(
         `Gespeichert: „${doc.name}" (${ir.triggers.length} Auslöser, ${ir.actions.length} Aktionen).` + warn,
@@ -625,11 +632,11 @@ class HaBlocklyPanel extends HTMLElement {
   _validate(ir) {
     const errors = [];
     const warnings = [];
-    if (!ir.triggers || !ir.triggers.length) {
-      errors.push("Es fehlt ein Auslöser-Block – die Regel würde nie starten.");
-    }
     if (!ir.actions || !ir.actions.length) {
       errors.push("Es fehlt eine Aktion – die Regel macht nichts.");
+    }
+    if (!ir.triggers || !ir.triggers.length) {
+      warnings.push("Kein Auslöser – die Regel läuft nur per Test, nicht automatisch.");
     }
     const ents = new Set();
     const visit = (o) => {
@@ -660,8 +667,17 @@ class HaBlocklyPanel extends HTMLElement {
   }
 
   async _runCurrent() {
-    if (!this._currentId) {
-      this._status("Bitte zuerst eine gespeicherte Regel auswählen.", true);
+    if (!this._workspace) return;
+    // Always save the current canvas first, then test exactly what is shown.
+    let saved;
+    try {
+      saved = await this._persist();
+    } catch (err) {
+      this._status("Speichern vor dem Test fehlgeschlagen: " + err.message, true);
+      return;
+    }
+    if (!saved.ir.actions || !saved.ir.actions.length) {
+      this._status("Keine Aktionen zum Testen – füge Aktionsblöcke hinzu.", true);
       return;
     }
     try {
@@ -671,7 +687,7 @@ class HaBlocklyPanel extends HTMLElement {
         this._renderTrace(res.trace);
         this._logTrace(res.trace);
       }
-      this._status('Testlauf ausgeführt – siehe „Ausführung & Protokoll" unten.');
+      this._status('Gespeichert & getestet – siehe „Ausführung & Protokoll" unten.');
     } catch (err) {
       this._status("Testlauf fehlgeschlagen: " + err.message, true);
     }
