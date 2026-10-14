@@ -60,6 +60,16 @@ const STYLES = `
 .hab-rule.active{background:var(--primary-color,#03a9f4);color:#fff;}
 .hab-rule .rname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .hab-rule.disabled .rname{opacity:.5;text-decoration:line-through;}
+.hab-rdot{width:9px;height:9px;border-radius:50%;flex:none;}
+.hab-rdot.on{background:#43a047;box-shadow:0 0 5px rgba(67,160,71,.8);}
+.hab-rdot.off{background:#e53935;}
+.hab-rule .rbtn.pause{color:#e53935;opacity:.9;font-size:12px;}
+.hab-rule .rbtn.play{color:#43a047;opacity:.95;font-size:12px;}
+.hab-rule.active .rbtn.pause,.hab-rule.active .rbtn.play{color:#fff;}
+.hab-active-badge{font-size:12px;font-weight:600;padding:5px 10px;border-radius:12px;
+  cursor:pointer;color:#fff;white-space:nowrap;}
+.hab-active-badge.on{background:#43a047;}
+.hab-active-badge.off{background:#9e9e9e;}
 .hab-ai{border-top:1px solid var(--divider-color,#e0e0e0);padding:10px 12px;}
 .hab-ai textarea{width:100%;box-sizing:border-box;min-height:70px;border-radius:8px;
   border:1px solid var(--divider-color,#ccc);padding:8px;font-size:14px;resize:vertical;
@@ -177,6 +187,7 @@ class HaBlocklyPanel extends HTMLElement {
             <option value="info" selected>Protokoll: Info</option>
             <option value="debug">Protokoll: Debug</option>
           </select>
+          <span class="hab-active-badge" id="hab-active-badge" style="display:none"></span>
           <button class="hab-btn primary" id="hab-save">Speichern</button>
           <button class="hab-btn" id="hab-new">Neu</button>
           <button class="hab-btn" id="hab-run">Test ▶</button>
@@ -230,6 +241,10 @@ class HaBlocklyPanel extends HTMLElement {
     this._q("#hab-refresh").onclick = () => this._loadData();
     this._q("#hab-ai-go").onclick = () => this._aiGenerate();
     this._q("#hab-loglevel").onchange = () => this._onLogLevelChange();
+    this._q("#hab-active-badge").onclick = () => {
+      const rule = (this._rules || []).find((r) => r.id === this._currentId);
+      if (rule) this._setEnabled(rule.id, !rule.enabled);
+    };
     this._subscribeTraces();
     this._q("#hab-trace-head").onclick = (e) => {
       if (e.target.tagName === "BUTTON") return;
@@ -541,23 +556,29 @@ class HaBlocklyPanel extends HTMLElement {
     if (!this._rules.length && !folders.size) {
       tree.innerHTML = '<div class="hab-empty">Noch keine Regeln. Lege Blöcke an und klicke „Speichern".</div>';
     }
+    this._updateActiveBadge();
   }
 
   _ruleRow(rule) {
     const row = document.createElement("div");
     row.className = "hab-rule" + (rule.id === this._currentId ? " active" : "") +
       (rule.enabled ? "" : " disabled");
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = rule.enabled;
-    cb.title = "Aktiviert";
-    cb.onclick = (e) => {
-      e.stopPropagation();
-      this._setEnabled(rule.id, cb.checked);
-    };
+    // Status dot: green = active/running, red = inactive.
+    const dot = document.createElement("span");
+    dot.className = "hab-rdot " + (rule.enabled ? "on" : "off");
+    dot.title = rule.enabled ? "Aktiv" : "Inaktiv";
     const name = document.createElement("span");
     name.className = "rname";
     name.textContent = rule.name;
+    // Play/pause toggle next to the trash icon.
+    const toggle = document.createElement("button");
+    toggle.className = "rbtn " + (rule.enabled ? "pause" : "play");
+    toggle.textContent = rule.enabled ? "⏸" : "▶";
+    toggle.title = rule.enabled ? "Regel pausieren" : "Regel aktivieren";
+    toggle.onclick = (e) => {
+      e.stopPropagation();
+      this._setEnabled(rule.id, !rule.enabled);
+    };
     const del = document.createElement("button");
     del.className = "rbtn";
     del.textContent = "🗑";
@@ -566,11 +587,26 @@ class HaBlocklyPanel extends HTMLElement {
       e.stopPropagation();
       this._deleteRule(rule.id);
     };
-    row.appendChild(cb);
+    row.appendChild(dot);
     row.appendChild(name);
+    row.appendChild(toggle);
     row.appendChild(del);
     row.onclick = () => this._selectRule(rule.id);
     return row;
+  }
+
+  _updateActiveBadge() {
+    const el = this._q("#hab-active-badge");
+    if (!el) return;
+    const rule = (this._rules || []).find((r) => r.id === this._currentId);
+    if (!rule) {
+      el.style.display = "none";
+      return;
+    }
+    el.style.display = "";
+    el.textContent = rule.enabled ? "● aktiv" : "● inaktiv";
+    el.className = "hab-active-badge " + (rule.enabled ? "on" : "off");
+    el.title = rule.enabled ? "Regel ist aktiv – klicken zum Pausieren" : "Regel ist inaktiv – klicken zum Aktivieren";
   }
 
   // --- Rule actions -----------------------------------------------------
