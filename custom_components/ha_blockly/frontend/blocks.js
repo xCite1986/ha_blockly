@@ -9,11 +9,11 @@ function injectSearchFieldCss() {
   const st = document.createElement("style");
   st.id = "hab-fs-style";
   st.textContent = `
-.hab-fs{display:flex;flex-direction:column;width:320px;max-width:92vw;
+.hab-fs{display:flex;flex-direction:column;width:640px;max-width:94vw;
   font-family:Roboto,Arial,sans-serif;}
 .hab-fs-search{padding:9px 11px;border:none;border-bottom:1px solid #e0e0e0;
   font-size:14px;outline:none;width:100%;box-sizing:border-box;background:#fff;color:#212121;}
-.hab-fs-list{max-height:280px;overflow:auto;}
+.hab-fs-list{max-height:400px;overflow:auto;}
 .hab-fs-item{padding:8px 11px;font-size:13px;cursor:pointer;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;color:#212121;}
 .hab-fs-item:hover,.hab-fs-item.sel{background:#e8f0fe;}
