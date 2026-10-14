@@ -36,8 +36,37 @@ function compileTrigger(block) {
       if (forS > 0) trig.for = forS;
       return { trigger: trig };
     }
+    case "ha_on_numeric": {
+      const trig = { type: "numeric_state", entity: field(block, "ENTITY") };
+      const op = field(block, "OP");
+      const num = Number(field(block, "NUM"));
+      if (op === "above") trig.above = num;
+      else trig.below = num;
+      const attr = field(block, "ATTRIBUTE");
+      if (attr) trig.attribute = attr;
+      const forS = Number(field(block, "FOR")) || 0;
+      if (forS > 0) trig.for = forS;
+      return { trigger: trig };
+    }
     case "ha_on_time":
       return { trigger: { type: "time", at: field(block, "TIME") || "00:00:00" } };
+    case "ha_on_sun":
+      return {
+        trigger: {
+          type: "sun",
+          event: field(block, "EVENT") || "sunset",
+          offset: Number(field(block, "OFFSET")) || 0,
+        },
+      };
+    case "ha_on_zone":
+      return {
+        trigger: {
+          type: "zone",
+          entity: field(block, "ENTITY"),
+          zone: field(block, "ZONE"),
+          event: field(block, "EVENT") || "enter",
+        },
+      };
     case "ha_on_event":
       return { trigger: { type: "event", event_type: field(block, "EVENT") } };
     case "ha_on_start":
@@ -106,6 +135,53 @@ function compileStatement(block) {
       };
     case "ha_wait":
       return { type: "wait", seconds: compileValue(block.getInputTargetBlock("SECONDS")) };
+    case "ha_wait_until": {
+      const stmt = {
+        type: "wait_until",
+        condition: compileValue(block.getInputTargetBlock("COND")),
+      };
+      const timeout = Number(field(block, "TIMEOUT")) || 0;
+      if (timeout > 0) stmt.timeout = timeout;
+      return stmt;
+    }
+    case "ha_var_inc":
+      return {
+        type: "set_var",
+        name: field(block, "NAME"),
+        value: {
+          type: "math",
+          op: "+",
+          a: { type: "var", name: field(block, "NAME") },
+          b: compileValue(block.getInputTargetBlock("VALUE")),
+        },
+      };
+    case "ha_var_dec":
+      return {
+        type: "set_var",
+        name: field(block, "NAME"),
+        value: {
+          type: "math",
+          op: "-",
+          a: { type: "var", name: field(block, "NAME") },
+          b: compileValue(block.getInputTargetBlock("VALUE")),
+        },
+      };
+    case "ha_scene":
+      return { type: "service", domain: "scene", service: "turn_on", target: { entity_id: field(block, "ENTITY") } };
+    case "ha_script":
+      return { type: "service", domain: "script", service: "turn_on", target: { entity_id: field(block, "ENTITY") } };
+    case "ha_automation":
+      return { type: "service", domain: "automation", service: "trigger", target: { entity_id: field(block, "ENTITY") } };
+    case "ha_tts":
+      return {
+        type: "service",
+        domain: "tts",
+        service: "speak",
+        target: { entity_id: field(block, "TTS") },
+        data: { media_player_entity_id: field(block, "MEDIA"), message: field(block, "TEXT") },
+      };
+    case "ha_stop":
+      return { type: "stop" };
     case "ha_repeat":
       return {
         type: "repeat",
@@ -178,6 +254,8 @@ function compileValue(block) {
       };
     case "ha_template":
       return { type: "template", template: field(block, "TPL") };
+    case "ha_trigger_value":
+      return { type: "trigger", field: field(block, "FIELD") || "to_state" };
     default:
       return null;
   }

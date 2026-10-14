@@ -58,9 +58,28 @@ function makeTrigger(workspace, trig, Blockly) {
       setField(block, "ATTRIBUTE", trig.attribute || "");
       setField(block, "FOR", trig.for || 0);
       break;
+    case "numeric_state":
+      block = newBlock(workspace, "ha_on_numeric", Blockly);
+      setField(block, "ENTITY", trig.entity);
+      setField(block, "OP", trig.above != null ? "above" : "below");
+      setField(block, "NUM", trig.above != null ? trig.above : trig.below != null ? trig.below : 0);
+      setField(block, "ATTRIBUTE", trig.attribute || "");
+      setField(block, "FOR", trig.for || 0);
+      break;
     case "time":
       block = newBlock(workspace, "ha_on_time", Blockly);
       setField(block, "TIME", trig.at || "00:00:00");
+      break;
+    case "sun":
+      block = newBlock(workspace, "ha_on_sun", Blockly);
+      setField(block, "EVENT", trig.event || "sunset");
+      setField(block, "OFFSET", trig.offset || 0);
+      break;
+    case "zone":
+      block = newBlock(workspace, "ha_on_zone", Blockly);
+      setField(block, "ENTITY", trig.entity);
+      setField(block, "EVENT", trig.event || "enter");
+      setField(block, "ZONE", trig.zone || "zone.home");
       break;
     case "event":
       block = newBlock(workspace, "ha_on_event", Blockly);
@@ -281,7 +300,7 @@ function normTrigger(t) {
   if (!t || typeof t !== "object") return null;
   const type = t.type || t.platform;
   if (type === "time") return { type: "time", at: t.at || "00:00:00" };
-  if (type === "state" || type === "numeric_state") {
+  if (type === "state") {
     const r = { type: "state", entity: firstEntity(t.entity || t.entity_id) };
     if (t.to != null) r.to = t.to;
     if (t.from != null) r.from = t.from;
@@ -289,6 +308,19 @@ function normTrigger(t) {
     const f = parseSeconds(t.for);
     if (f) r.for = f;
     return r.entity ? r : null;
+  }
+  if (type === "numeric_state") {
+    const r = { type: "numeric_state", entity: firstEntity(t.entity || t.entity_id) };
+    if (t.above != null) r.above = Number(t.above);
+    if (t.below != null) r.below = Number(t.below);
+    if (t.attribute) r.attribute = t.attribute;
+    const f = parseSeconds(t.for);
+    if (f) r.for = f;
+    return r.entity ? r : null;
+  }
+  if (type === "sun") return { type: "sun", event: t.event || "sunset", offset: parseSeconds(t.offset) || 0 };
+  if (type === "zone") {
+    return { type: "zone", entity: firstEntity(t.entity || t.entity_id), zone: t.zone, event: t.event || "enter" };
   }
   if (type === "homeassistant" || type === "ha_start") return { type: "ha_start" };
   if (type === "event") return { type: "event", event_type: t.event_type };

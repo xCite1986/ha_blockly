@@ -528,8 +528,15 @@ class HaBlocklyPanel extends HTMLElement {
       this._status("Kompilierung fehlgeschlagen: " + err.message, true);
       return;
     }
-    if (!ir.triggers.length) {
-      this._status("Warnung: kein Auslöser-Block. Regel wird nie ausgeführt.", true);
+    const v = this._validate(ir);
+    if (v.errors.length) {
+      const ok = window.confirm(
+        "Die Regel ist unvollständig:\n\n- " + v.errors.join("\n- ") + "\n\nTrotzdem speichern?"
+      );
+      if (!ok) {
+        this._status("Nicht gespeichert: " + v.errors.join(" "), true);
+        return;
+      }
     }
     const workspace = this._Blockly.serialization.workspaces.save(this._workspace);
     const rule = { name, folder, workspace, ir };
@@ -538,10 +545,51 @@ class HaBlocklyPanel extends HTMLElement {
       const doc = await this._ws({ type: "ha_blockly/save", rule });
       this._currentId = doc.id;
       await this._loadData();
-      this._status(`Gespeichert: „${doc.name}" (${ir.triggers.length} Auslöser, ${ir.actions.length} Aktionen).`);
+      const warn = v.warnings.length ? "  ⚠ " + v.warnings.join("; ") : "";
+      this._status(
+        `Gespeichert: „${doc.name}" (${ir.triggers.length} Auslöser, ${ir.actions.length} Aktionen).` + warn,
+        v.warnings.length > 0
+      );
     } catch (err) {
       this._status("Speichern fehlgeschlagen: " + err.message, true);
     }
+  }
+
+  _validate(ir) {
+    const errors = [];
+    const warnings = [];
+    if (!ir.triggers || !ir.triggers.length) {
+      errors.push("Es fehlt ein Auslöser-Block – die Regel würde nie starten.");
+    }
+    if (!ir.actions || !ir.actions.length) {
+      errors.push("Es fehlt eine Aktion – die Regel macht nichts.");
+    }
+    const ents = new Set();
+    const visit = (o) => {
+      if (!o || typeof o !== "object") return;
+      if (Array.isArray(o)) {
+        o.forEach(visit);
+        return;
+      }
+      for (const [k, val] of Object.entries(o)) {
+        if ((k === "entity" || k === "zone" || k === "entity_id") && typeof val === "string" && val.includes(".")) {
+          ents.add(val);
+        } else {
+          visit(val);
+        }
+      }
+    };
+    visit(ir);
+    const h = this._hass;
+    if (h && h.states) {
+      const missing = [...ents].filter((e) => !h.states[e]);
+      if (missing.length) {
+        warnings.push(
+          "Unbekannte Entitäten: " + missing.slice(0, 8).join(", ") + (missing.length > 8 ? " …" : "")
+        );
+      }
+    }
+    return { errors, warnings };
   }
 
   async _runCurrent() {

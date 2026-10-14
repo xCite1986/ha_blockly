@@ -168,11 +168,12 @@ function defineSearchField(Blockly) {
 
 export function defineBlocks(Blockly) {
   defineSearchField(Blockly);
-  const C_TRIGGER = 230;
-  const C_ACTION = 160;
-  const C_LOGIC = 210;
-  const C_VALUE = 65;
-  const C_VAR = 330;
+  const C_TRIGGER = "#5969A4";
+  const C_ACTION = "#52A58C";
+  const C_LOGIC = "#6089AB";
+  const C_VALUE = "#A4A96A";
+  const C_VAR = "#A06594";
+  const C_OTHER = "#707780";
 
   Blockly.defineBlocksWithJsonArray([
     // ---- Triggers --------------------------------------------------------
@@ -473,6 +474,181 @@ export function defineBlocks(Blockly) {
       colour: C_VALUE,
       tooltip: "Rendert ein Jinja2-Template von Home Assistant.",
     },
+
+    // ---- More triggers ---------------------------------------------------
+    {
+      type: "ha_on_numeric",
+      message0: "Wenn Wert von %1",
+      args0: [{ type: "field_search", name: "ENTITY", text: "sensor.beispiel", variant: "entity" }],
+      message1: "%1 %2",
+      args1: [
+        {
+          type: "field_dropdown",
+          name: "OP",
+          options: [
+            ["überschreitet", "above"],
+            ["unterschreitet", "below"],
+          ],
+        },
+        { type: "field_number", name: "NUM", value: 0 },
+      ],
+      message2: "Attribut %1  für %2 Sekunden",
+      args2: [
+        { type: "field_input", name: "ATTRIBUTE", text: "" },
+        { type: "field_number", name: "FOR", value: 0, min: 0 },
+      ],
+      message3: "mache %1",
+      args3: [{ type: "input_statement", name: "DO" }],
+      colour: C_TRIGGER,
+      tooltip: "Löst aus, wenn ein numerischer Messwert einen Grenzwert über-/unterschreitet.",
+    },
+    {
+      type: "ha_on_sun",
+      message0: "Bei %1 Versatz %2 Sekunden",
+      args0: [
+        {
+          type: "field_dropdown",
+          name: "EVENT",
+          options: [
+            ["Sonnenaufgang", "sunrise"],
+            ["Sonnenuntergang", "sunset"],
+          ],
+        },
+        { type: "field_number", name: "OFFSET", value: 0 },
+      ],
+      message1: "mache %1",
+      args1: [{ type: "input_statement", name: "DO" }],
+      colour: C_TRIGGER,
+      tooltip: "Löst zu Sonnenauf-/untergang aus (Versatz in Sekunden, negativ = vorher).",
+    },
+    {
+      type: "ha_on_zone",
+      message0: "Wenn %1 %2 Zone %3",
+      args0: [
+        { type: "field_search", name: "ENTITY", text: "person.ich", variant: "entity" },
+        {
+          type: "field_dropdown",
+          name: "EVENT",
+          options: [
+            ["betritt", "enter"],
+            ["verlässt", "leave"],
+          ],
+        },
+        { type: "field_search", name: "ZONE", text: "zone.home", variant: "entity" },
+      ],
+      message1: "mache %1",
+      args1: [{ type: "input_statement", name: "DO" }],
+      colour: C_TRIGGER,
+      tooltip: "Löst aus, wenn eine Person eine Zone betritt oder verlässt.",
+    },
+
+    // ---- More logic ------------------------------------------------------
+    {
+      type: "ha_wait_until",
+      message0: "warte bis %1",
+      args0: [{ type: "input_value", name: "COND", check: "Boolean" }],
+      message1: "Timeout %1 Sekunden (0 = unbegrenzt)",
+      args1: [{ type: "field_number", name: "TIMEOUT", value: 0, min: 0 }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: C_LOGIC,
+      tooltip: "Wartet, bis eine Bedingung erfüllt ist (oder der Timeout abläuft).",
+    },
+
+    // ---- More values -----------------------------------------------------
+    {
+      type: "ha_trigger_value",
+      message0: "Auslöser: %1",
+      args0: [
+        {
+          type: "field_dropdown",
+          name: "FIELD",
+          options: [
+            ["neuer Zustand", "to_state"],
+            ["vorheriger Zustand", "from_state"],
+            ["Entität", "entity_id"],
+          ],
+        },
+      ],
+      output: null,
+      colour: C_VALUE,
+      tooltip: "Daten des auslösenden Ereignisses (neuer/alter Zustand, Entität).",
+    },
+
+    // ---- More variables --------------------------------------------------
+    {
+      type: "ha_var_inc",
+      message0: "erhöhe Variable %1 um %2",
+      args0: [
+        { type: "field_input", name: "NAME", text: "x" },
+        { type: "input_value", name: "VALUE" },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      colour: C_VAR,
+      tooltip: "Erhöht eine Variable um einen Wert.",
+    },
+    {
+      type: "ha_var_dec",
+      message0: "verringere Variable %1 um %2",
+      args0: [
+        { type: "field_input", name: "NAME", text: "x" },
+        { type: "input_value", name: "VALUE" },
+      ],
+      previousStatement: null,
+      nextStatement: null,
+      colour: C_VAR,
+      tooltip: "Verringert eine Variable um einen Wert.",
+    },
+
+    // ---- More (Weitere) --------------------------------------------------
+    {
+      type: "ha_scene",
+      message0: "Szene aktivieren %1",
+      args0: [{ type: "field_search", name: "ENTITY", text: "scene.beispiel", variant: "entity" }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: C_OTHER,
+      tooltip: "Aktiviert eine Szene.",
+    },
+    {
+      type: "ha_script",
+      message0: "Skript ausführen %1",
+      args0: [{ type: "field_search", name: "ENTITY", text: "script.beispiel", variant: "entity" }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: C_OTHER,
+      tooltip: "Führt ein Skript aus.",
+    },
+    {
+      type: "ha_automation",
+      message0: "Automation auslösen %1",
+      args0: [{ type: "field_search", name: "ENTITY", text: "automation.beispiel", variant: "entity" }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: C_OTHER,
+      tooltip: "Löst eine Home-Assistant-Automation aus.",
+    },
+    {
+      type: "ha_tts",
+      message0: "Sprachausgabe (TTS) über %1",
+      args0: [{ type: "field_search", name: "TTS", text: "tts.home_assistant_cloud", variant: "entity" }],
+      message1: "Media-Player %1",
+      args1: [{ type: "field_search", name: "MEDIA", text: "media_player.wohnzimmer", variant: "entity" }],
+      message2: "Text %1",
+      args2: [{ type: "field_input", name: "TEXT", text: "Hallo" }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: C_OTHER,
+      tooltip: "Spricht einen Text über eine TTS-Engine auf einem Media-Player aus.",
+    },
+    {
+      type: "ha_stop",
+      message0: "Ablauf beenden",
+      previousStatement: null,
+      colour: C_OTHER,
+      tooltip: "Beendet die Ausführung dieser Regel.",
+    },
   ]);
 }
 
@@ -482,10 +658,13 @@ export const TOOLBOX = {
     {
       kind: "category",
       name: "Auslöser",
-      colour: "230",
+      colour: "#5969A4",
       contents: [
         { kind: "block", type: "ha_on_state" },
+        { kind: "block", type: "ha_on_numeric" },
         { kind: "block", type: "ha_on_time" },
+        { kind: "block", type: "ha_on_sun" },
+        { kind: "block", type: "ha_on_zone" },
         { kind: "block", type: "ha_on_event" },
         { kind: "block", type: "ha_on_start" },
       ],
@@ -493,33 +672,34 @@ export const TOOLBOX = {
     {
       kind: "category",
       name: "Aktionen",
-      colour: "160",
+      colour: "#52A58C",
       contents: [
         { kind: "block", type: "ha_set" },
         { kind: "block", type: "ha_call_service" },
         { kind: "block", type: "ha_wait" },
         { kind: "block", type: "ha_repeat" },
         { kind: "block", type: "ha_log" },
-        { kind: "block", type: "ha_notify" },
       ],
     },
     {
       kind: "category",
       name: "Logik",
-      colour: "210",
+      colour: "#6089AB",
       contents: [
         { kind: "block", type: "ha_if" },
         { kind: "block", type: "ha_compare" },
         { kind: "block", type: "ha_logic" },
         { kind: "block", type: "ha_not" },
+        { kind: "block", type: "ha_wait_until" },
       ],
     },
     {
       kind: "category",
       name: "Werte",
-      colour: "65",
+      colour: "#A4A96A",
       contents: [
         { kind: "block", type: "ha_state" },
+        { kind: "block", type: "ha_trigger_value" },
         { kind: "block", type: "ha_number" },
         { kind: "block", type: "ha_text" },
         { kind: "block", type: "ha_bool" },
@@ -530,10 +710,25 @@ export const TOOLBOX = {
     {
       kind: "category",
       name: "Variablen",
-      colour: "330",
+      colour: "#A06594",
       contents: [
         { kind: "block", type: "ha_set_var" },
         { kind: "block", type: "ha_var_get" },
+        { kind: "block", type: "ha_var_inc" },
+        { kind: "block", type: "ha_var_dec" },
+      ],
+    },
+    {
+      kind: "category",
+      name: "Weitere",
+      colour: "#707780",
+      contents: [
+        { kind: "block", type: "ha_notify" },
+        { kind: "block", type: "ha_tts" },
+        { kind: "block", type: "ha_scene" },
+        { kind: "block", type: "ha_script" },
+        { kind: "block", type: "ha_automation" },
+        { kind: "block", type: "ha_stop" },
       ],
     },
   ],

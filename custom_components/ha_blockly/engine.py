@@ -15,20 +15,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import time as dt_time
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import template
 from homeassistant.helpers.event import (
-    async_track_point_in_time,
     async_track_state_change_event,
+    async_track_sunrise,
+    async_track_sunset,
     async_track_time_change,
 )
 import homeassistant.util.dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class _StopRule(Exception):
+    """Raised by the 'stop' action to abort the current rule run."""
 
 
 class BlocklyEngine:
@@ -91,8 +96,14 @@ class BlocklyEngine:
             ttype = trig.get("type")
             if ttype == "state":
                 self._setup_state_trigger(name, trig, actions)
+            elif ttype == "numeric_state":
+                self._setup_numeric_trigger(name, trig, actions)
             elif ttype == "time":
                 self._setup_time_trigger(name, trig, actions)
+            elif ttype == "sun":
+                self._setup_sun_trigger(name, trig, actions)
+            elif ttype == "zone":
+                self._setup_zone_trigger(name, trig, actions)
             elif ttype == "event":
                 self._setup_event_trigger(name, trig, actions)
             elif ttype == "ha_start":
@@ -188,6 +199,127 @@ class BlocklyEngine:
         )
 
     @callback
+    def _setup_numeric_trigger(self, name, trig, actions) -> None:
+        entity = trig.get("entity")
+        if not entity:
+            return
+        above = trig.get("above")
+        below = trig.get("below")
+        attribute = trig.get("attribute")
+        for_seconds = trig.get("for")
+        pending: dict[str, asyncio.Task] = {}
+
+        def _num(state_obj):
+            if state_obj is None:
+                return None
+            raw = state_obj.attributes.get(attribute) if attribute else state_obj.state
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return None
+
+        def _in_range(v) -> bool:
+            if v is None:
+                return False
+            if above is not None and not (v > float(above)):
+                return False
+            if below is not None and not (v < float(below)):
+                return False
+            return above is not None or below is not None
+
+        @callback
+        def _handle(event: Event) -> None:
+            nv = _num(event.data.get("new_state"))
+            ov = _num(event.data.get("old_state"))
+            if not (_in_range(nv) and not _in_range(ov)):
+                return  # only fire on transition into range
+            ctx = {
+                "trigger": {
+                    "platform": "numeric_state",
+                    "entity_id": event.data.get("entity_id"),
+                    "from_state": ov,
+                    "to_state": nv,
+                }
+            }
+            if for_seconds:
+                eid = event.data.get("entity_id")
+                if eid in pending:
+                    pending[eid].cancel()
+
+                async def _delayed(sec=for_seconds, a=actions, c=ctx, e=eid):
+                    try:
+                        await asyncio.sleep(float(sec))
+                        if _in_range(_num(self._hass.states.get(entity))):
+                            self._fire(name, a, c)
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        pending.pop(e, None)
+
+                pending[eid] = self._hass.async_create_task(_delayed())
+            else:
+                self._fire(name, actions, ctx)
+
+        self._unsubs.append(
+            async_track_state_change_event(self._hass, [entity], _handle)
+        )
+
+    @callback
+    def _setup_sun_trigger(self, name, trig, actions) -> None:
+        event = trig.get("event", "sunset")
+        try:
+            offset = timedelta(seconds=float(trig.get("offset") or 0))
+        except (TypeError, ValueError):
+            offset = timedelta(0)
+
+        def _cb():
+            self._fire(name, actions, {"trigger": {"platform": "sun", "event": event}})
+
+        if event == "sunrise":
+            self._unsubs.append(async_track_sunrise(self._hass, _cb, offset))
+        else:
+            self._unsubs.append(async_track_sunset(self._hass, _cb, offset))
+
+    @callback
+    def _setup_zone_trigger(self, name, trig, actions) -> None:
+        person = trig.get("entity")
+        zone = trig.get("zone")
+        event = trig.get("event", "enter")
+        if not person or not zone:
+            return
+        if zone == "zone.home":
+            target = "home"
+        else:
+            zstate = self._hass.states.get(zone)
+            target = (
+                zstate.attributes.get("friendly_name")
+                if zstate and zstate.attributes.get("friendly_name")
+                else zone.split(".")[-1]
+            )
+
+        @callback
+        def _handle(event_: Event) -> None:
+            new = event_.data.get("new_state")
+            old = event_.data.get("old_state")
+            ns = new.state if new else None
+            os_ = old.state if old else None
+            was_in = os_ == target
+            is_in = ns == target
+            fire = (event == "enter" and is_in and not was_in) or (
+                event == "leave" and was_in and not is_in
+            )
+            if fire:
+                self._fire(
+                    name,
+                    actions,
+                    {"trigger": {"platform": "zone", "entity_id": person, "from_state": os_, "to_state": ns}},
+                )
+
+        self._unsubs.append(
+            async_track_state_change_event(self._hass, [person], _handle)
+        )
+
+    @callback
     def _setup_event_trigger(self, name, trig, actions) -> None:
         event_type = trig.get("event_type")
         if not event_type:
@@ -216,6 +348,8 @@ class BlocklyEngine:
         _LOGGER.debug("Blockly rule '%s' triggered", name)
         try:
             await self._exec_block(actions, variables, ctx)
+        except _StopRule:
+            _LOGGER.debug("Blockly rule '%s' stopped by stop action", name)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -240,6 +374,10 @@ class BlocklyEngine:
         elif stype == "wait":
             seconds = self._eval(stmt.get("seconds"), variables, ctx)
             await asyncio.sleep(float(seconds or 0))
+        elif stype == "wait_until":
+            await self._do_wait_until(stmt, variables, ctx)
+        elif stype == "stop":
+            raise _StopRule()
         elif stype == "repeat":
             count = int(self._eval(stmt.get("count"), variables, ctx) or 0)
             for _ in range(count):
@@ -352,6 +490,23 @@ class BlocklyEngine:
             return
         await call("homeassistant", "turn_on")
 
+    async def _do_wait_until(self, stmt: dict, variables: dict, ctx: dict) -> bool:
+        """Poll a condition until it becomes true or an optional timeout elapses."""
+        timeout = self._eval(stmt.get("timeout"), variables, ctx)
+        try:
+            deadline = float(timeout) if timeout else None
+        except (TypeError, ValueError):
+            deadline = None
+        waited = 0.0
+        interval = 1.0
+        while True:
+            if self._eval_condition(stmt.get("condition"), variables, ctx):
+                return True
+            if deadline is not None and waited >= deadline:
+                return False
+            await asyncio.sleep(interval)
+            waited += interval
+
     async def _do_notify(self, stmt: dict, variables: dict, ctx: dict) -> None:
         service = stmt.get("service", "notify")
         domain, _, svc = service.partition(".")
@@ -416,6 +571,9 @@ class BlocklyEngine:
             return "".join(str(self._eval(p, variables, ctx)) for p in expr.get("parts", []))
         if etype == "now":
             return dt_util.now().isoformat()
+        if etype == "trigger":
+            trig = ctx.get("trigger") or {}
+            return trig.get(expr.get("field", "to_state"))
         return None
 
     def _read_state(self, entity: str | None, attribute: str | None):
