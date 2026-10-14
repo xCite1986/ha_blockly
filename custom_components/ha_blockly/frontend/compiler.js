@@ -84,7 +84,10 @@ function compileStatements(block) {
   while (block) {
     if (block.isEnabled()) {
       const stmt = compileStatement(block);
-      if (stmt) out.push(stmt);
+      if (stmt) {
+        stmt._id = block.id; // for test-run highlighting
+        out.push(stmt);
+      }
     }
     block = block.getNextBlock();
   }

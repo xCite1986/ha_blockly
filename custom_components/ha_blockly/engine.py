@@ -432,6 +432,7 @@ class BlocklyEngine:
                 "kind": "action",
                 "label": self._label(stmt, variables, ctx),
                 "status": "running",
+                "id": stmt.get("_id"),
             }
             trace["steps"].append(step)
             try:

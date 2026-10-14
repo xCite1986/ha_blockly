@@ -109,6 +109,10 @@ const STYLES = `
    Only editable fields are targeted, so block labels keep their own colour. */
 .hab-root .blocklyFieldRect{fill:#ffffff!important;stroke:#c7c7c7!important;fill-opacity:1!important;}
 .hab-root .blocklyEditableText>text{fill:#202020!important;}
+/* Test-run highlighting: executed blocks glow by status */
+.hab-ran-ok>.blocklyPath{stroke:#43a047!important;stroke-width:4px!important;}
+.hab-ran-error>.blocklyPath{stroke:#e53935!important;stroke-width:4px!important;}
+.hab-ran-stopped>.blocklyPath{stroke:#fb8c00!important;stroke-width:4px!important;}
 .hab-root[data-theme="dark"] .blocklyFieldRect{fill:#3b3b3b!important;stroke:#555555!important;}
 .hab-root[data-theme="dark"] .blocklyEditableText>text{fill:#f0f0f0!important;}
 /* Light mode (fixed so the toggle works regardless of HA's own theme) */
@@ -412,6 +416,68 @@ class HaBlocklyPanel extends HTMLElement {
         const h = getHass();
         const st = h && h.states && h.states[entityId];
         return st && st.attributes ? st.attributes.friendly_name || "" : "";
+      },
+      stateLabel: (entityId, value) => {
+        const h = getHass();
+        const v = String(value == null ? "" : value).toLowerCase();
+        if (!v) return "";
+        const domain = entityId ? entityId.split(".")[0] : "";
+        const st = h && h.states && h.states[entityId];
+        const dc = st && st.attributes ? st.attributes.device_class : null;
+        if (domain === "binary_sensor" && dc) {
+          const bmap = {
+            motion: ["Bewegung erkannt", "Keine Bewegung"],
+            occupancy: ["Belegt", "Frei"],
+            presence: ["Zuhause", "Abwesend"],
+            door: ["Offen", "Geschlossen"],
+            window: ["Offen", "Geschlossen"],
+            opening: ["Offen", "Geschlossen"],
+            garage_door: ["Offen", "Geschlossen"],
+            moisture: ["Feucht", "Trocken"],
+            gas: ["Erkannt", "Kein Gas"],
+            smoke: ["Rauch!", "Kein Rauch"],
+            carbon_monoxide: ["CO erkannt", "Normal"],
+            problem: ["Problem", "OK"],
+            safety: ["Unsicher", "Sicher"],
+            lock: ["Entriegelt", "Verriegelt"],
+            power: ["An", "Aus"],
+            plug: ["Eingesteckt", "Ausgesteckt"],
+            battery: ["Schwach", "OK"],
+            battery_charging: ["Lädt", "Lädt nicht"],
+            connectivity: ["Verbunden", "Getrennt"],
+            light: ["Hell", "Dunkel"],
+            heat: ["Heiß", "Normal"],
+            cold: ["Kalt", "Normal"],
+            vibration: ["Vibration", "Keine"],
+            tamper: ["Manipulation", "OK"],
+            update: ["Update verfügbar", "Aktuell"],
+            running: ["Läuft", "Aus"],
+            sound: ["Geräusch", "Still"],
+            moving: ["Bewegt sich", "Steht"],
+          };
+          const pair = bmap[dc];
+          if (pair) {
+            if (v === "on") return pair[0];
+            if (v === "off") return pair[1];
+          }
+        }
+        const map = {
+          on: "Ein", off: "Aus", true: "Ein", false: "Aus",
+          open: "Offen", closed: "Geschlossen", opening: "Öffnet", closing: "Schließt",
+          home: "Zuhause", not_home: "Abwesend",
+          locked: "Verriegelt", unlocked: "Entriegelt", jammed: "Klemmt",
+          locking: "Verriegelt…", unlocking: "Entriegelt…",
+          playing: "Spielt", paused: "Pausiert", idle: "Bereit", standby: "Standby", buffering: "Puffert",
+          unavailable: "Nicht verfügbar", unknown: "Unbekannt",
+          above_horizon: "Über Horizont", below_horizon: "Unter Horizont",
+          heat: "Heizen", cool: "Kühlen", auto: "Automatik", dry: "Trocknen",
+          fan_only: "Nur Lüfter", heat_cool: "Heizen/Kühlen",
+          cleaning: "Reinigt", docked: "An Station", returning: "Kehrt zurück", error: "Fehler",
+          disarmed: "Unscharf", armed_home: "Scharf (zuhause)", armed_away: "Scharf (abwesend)",
+          armed_night: "Scharf (Nacht)", armed_vacation: "Scharf (Urlaub)",
+          triggered: "Ausgelöst", arming: "Schärft…", pending: "Verzögerung",
+        };
+        return map[v] || "";
       },
       notifyServices: () => {
         const h = getHass();
@@ -758,17 +824,66 @@ class HaBlocklyPanel extends HTMLElement {
       this._status("Keine Aktionen zum Testen – füge Aktionsblöcke hinzu.", true);
       return;
     }
+    const crit = this._criticalActions(saved.ir);
+    if (crit.length) {
+      const ok = window.confirm(
+        "Achtung – dieser Testlauf führt sicherheitskritische Aktionen ECHT aus:\n\n- " +
+          crit.join("\n- ") +
+          "\n\nWirklich ausführen?"
+      );
+      if (!ok) {
+        this._status("Testlauf abgebrochen (kritische Aktionen).", true);
+        return;
+      }
+    }
     try {
       const res = await this._ws({ type: "ha_blockly/run", rule_id: this._currentId });
       if (res && res.trace) {
         this._showTrace();
         this._renderTrace(res.trace);
         this._logTrace(res.trace);
+        this._highlightTrace(res.trace);
       }
       this._status('Gespeichert & getestet – siehe „Ausführung & Protokoll" unten.');
     } catch (err) {
       this._status("Testlauf fehlgeschlagen: " + err.message, true);
     }
+  }
+
+  _criticalActions(ir) {
+    const CRIT = new Set([
+      "lock.unlock", "lock.open",
+      "alarm_control_panel.alarm_disarm", "alarm_control_panel.disarm",
+    ]);
+    const crit = [];
+    const walk = (stmts) => {
+      for (const s of stmts || []) {
+        if (!s || typeof s !== "object") continue;
+        if (s.type === "service") {
+          const key = (s.domain || "") + "." + (s.service || "");
+          if (CRIT.has(key)) {
+            const tgt = s.target && s.target.entity_id ? ` (${s.target.entity_id})` : "";
+            crit.push(key + tgt);
+          }
+        } else if (s.type === "set") {
+          const dom = (s.entity || "").split(".")[0];
+          const val = String(s.value == null ? "" : s.value).toLowerCase();
+          if (dom === "lock" && ["unlocked", "unlock", "open", "offen", "auf"].includes(val)) {
+            crit.push("entriegeln: " + s.entity);
+          }
+          if (dom === "alarm_control_panel" && val.includes("disarm")) {
+            crit.push("Alarm unscharf: " + s.entity);
+          }
+        } else if (s.type === "if") {
+          walk(s.then);
+          walk(s.else);
+        } else if (s.type === "repeat") {
+          walk(s.do);
+        }
+      }
+    };
+    walk(ir.actions);
+    return crit;
   }
 
   // --- Trace / log ------------------------------------------------------
@@ -786,6 +901,30 @@ class HaBlocklyPanel extends HTMLElement {
 
   _showTrace() {
     if (!this._traceOpen) this._toggleTrace();
+  }
+
+  _clearHighlights() {
+    (this._highlighted || []).forEach((g) =>
+      g.classList.remove("hab-ran-ok", "hab-ran-error", "hab-ran-stopped")
+    );
+    this._highlighted = [];
+  }
+
+  _highlightTrace(trace) {
+    this._clearHighlights();
+    if (this._highlightTimer) clearTimeout(this._highlightTimer);
+    if (!trace || !this._workspace) return;
+    for (const s of trace.steps || []) {
+      if (!s.id) continue;
+      const block = this._workspace.getBlockById(s.id);
+      if (!block || !block.getSvgRoot) continue;
+      const g = block.getSvgRoot();
+      const cls =
+        s.status === "error" ? "hab-ran-error" : s.status === "stopped" ? "hab-ran-stopped" : "hab-ran-ok";
+      g.classList.add(cls);
+      this._highlighted.push(g);
+    }
+    this._highlightTimer = setTimeout(() => this._clearHighlights(), 5000);
   }
 
   _statusDot(status, kind) {
@@ -860,6 +999,7 @@ class HaBlocklyPanel extends HTMLElement {
           this._showTrace();
           this._renderTrace(d.trace);
           this._logTrace(d.trace);
+          this._highlightTrace(d.trace);
         }
       }, "ha_blockly_trace");
     } catch (e) {

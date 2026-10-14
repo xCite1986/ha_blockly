@@ -97,6 +97,24 @@ function defineSearchField(Blockly) {
         return "";
       }
     }
+    _resolveStateEntity() {
+      const block = this.getSourceBlock && this.getSourceBlock();
+      if (this.variant_ === "cmpstate") return compareEntity(block);
+      if (this.variant_ === "state") return block ? block.getFieldValue("ENTITY") : null;
+      return null;
+    }
+    _subLabel(o) {
+      const api = window.__haBlockly || {};
+      try {
+        if (this.variant_ === "entity") return this._friendly(o);
+        if (this.variant_ === "state" || this.variant_ === "cmpstate") {
+          return api.stateLabel ? api.stateLabel(this._resolveStateEntity(), o) : "";
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      return "";
+    }
     // Open a searchable dropdown instead of the plain text editor.
     showEditor_(e) {
       const DD = Blockly.DropDownDiv;
@@ -138,7 +156,7 @@ function defineSearchField(Blockly) {
         const ql = (q || "").toLowerCase();
         const matches = [];
         for (const o of options) {
-          const fn = this.variant_ === "entity" ? this._friendly(o) : "";
+          const fn = this._subLabel(o);
           if (!ql || o.toLowerCase().includes(ql) || (fn && fn.toLowerCase().includes(ql))) {
             matches.push([o, fn]);
             if (matches.length >= 300) break;
