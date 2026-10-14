@@ -721,9 +721,40 @@ def _coerce(value):
         return value
 
 
+_TRUE_WORDS = {
+    "on", "true", "wahr", "yes", "ja", "1", "home", "open", "offen",
+    "locked", "playing", "active", "detected", "heat", "cool", "auto",
+}
+_FALSE_WORDS = {
+    "off", "false", "falsch", "unwahr", "no", "nein", "0", "not_home",
+    "closed", "geschlossen", "unlocked", "idle", "standby", "paused",
+    "unavailable", "unknown", "clear", "none", "",
+}
+
+
+def _to_bool(v):
+    """Map a value to True/False for boolean-aware comparison, else None."""
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return False
+    s = str(v).strip().lower()
+    if s in _TRUE_WORDS:
+        return True
+    if s in _FALSE_WORDS:
+        return False
+    return None
+
+
 def _compare(left, op, right) -> bool:
     left = _coerce(left)
     right = _coerce(right)
+    # Boolean-aware equality: compare on/off states against wahr/falsch sensibly.
+    if op in ("==", "=", "!=", "<>") and (isinstance(left, bool) or isinstance(right, bool)):
+        lb = _to_bool(left)
+        rb = _to_bool(right)
+        if lb is not None and rb is not None:
+            return lb == rb if op in ("==", "=") else lb != rb
     try:
         if op in ("==", "="):
             return str(left) == str(right) if not _both_num(left, right) else left == right
