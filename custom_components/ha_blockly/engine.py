@@ -229,6 +229,8 @@ class BlocklyEngine:
         stype = stmt.get("type")
         if stype == "service":
             await self._do_service(stmt, variables, ctx)
+        elif stype == "set":
+            await self._do_set(stmt, variables, ctx)
         elif stype == "if":
             cond = self._eval_condition(stmt.get("condition"), variables, ctx)
             branch = stmt.get("then") if cond else stmt.get("else")
@@ -271,6 +273,84 @@ class BlocklyEngine:
         if target.get("entity_id"):
             data["entity_id"] = target["entity_id"]
         await self._hass.services.async_call(domain, service, data, blocking=False)
+
+    async def _do_set(self, stmt: dict, variables: dict, ctx: dict) -> None:
+        """Set an entity to a state/value, picking the right service by domain."""
+        delay = self._eval(stmt.get("delay"), variables, ctx)
+        if delay:
+            await asyncio.sleep(float(delay))
+        entity = stmt.get("entity")
+        if not entity or "." not in entity:
+            return
+        domain = entity.split(".")[0]
+        value = self._eval(stmt.get("value"), variables, ctx)
+        sval = "" if value is None else str(value).strip()
+        low = sval.lower()
+        hass = self._hass
+
+        async def call(dom, svc, extra=None):
+            data = {"entity_id": entity}
+            if extra:
+                data.update(extra)
+            await hass.services.async_call(dom, svc, data, blocking=False)
+
+        try:
+            num = float(sval)
+        except (TypeError, ValueError):
+            num = None
+
+        # Domain-specific value setters (non on/off semantics).
+        if domain in ("input_select", "select"):
+            await call(domain, "select_option", {"option": sval})
+            return
+        if domain in ("input_number", "number") and num is not None:
+            await call(domain, "set_value", {"value": num})
+            return
+        if domain in ("input_text", "text"):
+            await call(domain, "set_value", {"value": sval})
+            return
+        if domain == "climate":
+            if num is not None:
+                await call("climate", "set_temperature", {"temperature": num})
+            elif low in ("off", "aus"):
+                await call("climate", "turn_off")
+            else:
+                await call("climate", "set_hvac_mode", {"hvac_mode": low})
+            return
+        if domain == "cover":
+            if num is not None:
+                await call("cover", "set_cover_position", {"position": int(num)})
+            elif low in ("open", "offen", "auf"):
+                await call("cover", "open_cover")
+            else:
+                await call("cover", "close_cover")
+            return
+        if domain == "lock":
+            if low in ("unlocked", "unlock", "auf", "offen"):
+                await call("lock", "unlock")
+            else:
+                await call("lock", "lock")
+            return
+        if domain == "light" and num is not None:
+            await call("light", "turn_on", {"brightness": int(num)})
+            return
+        if domain == "media_player" and num is not None:
+            await call("media_player", "volume_set", {"volume_level": num})
+            return
+
+        # Generic on/off.
+        if low in ("on", "true", "an", "ein", "1", "home", "playing"):
+            await call("homeassistant", "turn_on")
+            return
+        if low in ("off", "false", "aus", "0", "not_home", "idle", "paused"):
+            await call("homeassistant", "turn_off")
+            return
+
+        # Fallback: a set_value service if the domain has one, else turn_on.
+        if hass.services.has_service(domain, "set_value"):
+            await call(domain, "set_value", {"value": value})
+            return
+        await call("homeassistant", "turn_on")
 
     async def _do_notify(self, stmt: dict, variables: dict, ctx: dict) -> None:
         service = stmt.get("service", "notify")

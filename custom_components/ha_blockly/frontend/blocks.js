@@ -238,6 +238,21 @@ export function defineBlocks(Blockly) {
       tooltip: "Ruft einen Home-Assistant-Dienst auf (z.B. light.turn_on).",
     },
     {
+      type: "ha_set",
+      message0: "setze %1 auf %2",
+      args0: [
+        { type: "field_search", name: "ENTITY", text: "light.beispiel", variant: "entity" },
+        { type: "field_search", name: "VALUE", text: "on", variant: "state" },
+      ],
+      message1: "Verzögerung %1 Sekunden",
+      args1: [{ type: "field_number", name: "DELAY", value: 0, min: 0 }],
+      previousStatement: null,
+      nextStatement: null,
+      colour: C_ACTION,
+      tooltip:
+        "Setzt eine Entität auf einen Zustand/Wert. Der passende Dienst wird automatisch gewählt: an/aus, Rollo-Position, Auswahl-Option, Temperatur/Modus, Helligkeit usw.",
+    },
+    {
       type: "ha_if",
       message0: "falls %1",
       args0: [{ type: "input_value", name: "COND", check: "Boolean" }],
@@ -477,6 +492,7 @@ export const TOOLBOX = {
       name: "Aktionen",
       colour: "160",
       contents: [
+        { kind: "block", type: "ha_set" },
         { kind: "block", type: "ha_call_service" },
         { kind: "block", type: "ha_wait" },
         { kind: "block", type: "ha_repeat" },

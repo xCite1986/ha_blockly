@@ -81,6 +81,16 @@ function compileStatement(block) {
       if (delay > 0) stmt.delay = delay;
       return stmt;
     }
+    case "ha_set": {
+      const stmt = {
+        type: "set",
+        entity: field(block, "ENTITY"),
+        value: field(block, "VALUE"),
+      };
+      const delay = Number(field(block, "DELAY")) || 0;
+      if (delay > 0) stmt.delay = delay;
+      return stmt;
+    }
     case "ha_if":
       return {
         type: "if",
