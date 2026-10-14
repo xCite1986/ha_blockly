@@ -920,8 +920,16 @@ class HaBlocklyPanel extends HTMLElement {
       buildFromIR(this._workspace, ir, this._Blockly);
       if (ir.name) this._q("#hab-name").value = ir.name;
       this._currentId = null;
-      const nt = (ir.triggers || []).length;
-      const na = (ir.actions || []).length;
+      // Count what actually landed on the canvas (not the raw AI shape).
+      let nt = 0;
+      let na = 0;
+      try {
+        const compiled = compileWorkspace(this._workspace);
+        nt = compiled.triggers.length;
+        na = compiled.actions.length;
+      } catch (e) {
+        /* ignore */
+      }
       this._aiStatus(`✓ Fertig: ${nt} Auslöser, ${na} Aktionen. Prüfen und „Speichern" klicken.`);
     } catch (err) {
       this._aiStatus("⚠ KI-Anfrage fehlgeschlagen: " + err.message, true);

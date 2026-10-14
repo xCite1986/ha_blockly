@@ -94,6 +94,28 @@ def _entity_context(hass: HomeAssistant, limit: int = 400) -> str:
     return "\n".join(lines)
 
 
+_SERVICE_DOMAINS = [
+    "notify", "light", "switch", "cover", "climate", "fan", "media_player",
+    "lock", "script", "scene", "automation", "input_boolean", "input_number",
+    "input_select", "input_text", "number", "select", "button", "siren",
+    "humidifier", "vacuum", "valve",
+]
+
+
+def _service_context(hass: HomeAssistant) -> str:
+    """List real, callable services per domain so the LLM uses existing names."""
+    try:
+        services = hass.services.async_services()
+    except Exception:  # noqa: BLE001
+        return ""
+    lines: list[str] = []
+    for domain in _SERVICE_DOMAINS:
+        svc = services.get(domain)
+        if svc:
+            lines.append(f"{domain}: " + ", ".join(sorted(svc.keys())))
+    return "\n".join(lines)
+
+
 async def async_generate_ir(
     hass: HomeAssistant,
     prompt: str,
@@ -111,7 +133,12 @@ async def async_generate_ir(
 
     user_text = (
         f"{SYSTEM_PROMPT}\n\n"
-        f"Available entities:\n{_entity_context(hass)}\n\n"
+        f"Available entities (entity_id = state (name)):\n{_entity_context(hass)}\n\n"
+        f"Available services (domain: service1, service2, ...):\n{_service_context(hass)}\n\n"
+        "Rules: Use ONLY entity_ids and services that appear above. Do NOT invent "
+        "names. For notifications pick an existing notify.* service (for example "
+        "notify.telegram or a notify.mobile_app_* service). Split a service into "
+        '"domain" and "service" (e.g. notify.telegram -> domain "notify", service "telegram").\n\n'
         f"User request:\n{prompt}\n\n"
         f"Return only the JSON IR object."
     )
