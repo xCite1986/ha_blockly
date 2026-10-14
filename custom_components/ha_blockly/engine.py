@@ -356,8 +356,15 @@ class BlocklyEngine:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
+    def _rule_log_level(self, rid: str) -> str:
+        if not rid:
+            return "info"
+        rule = self._store.get_rule(rid)
+        return (rule or {}).get("log_level", "info")
+
     async def _run(self, rid: str, name: str, actions: list, ctx: dict, *, test: bool = False) -> dict:
         variables: dict[str, Any] = {}
+        level = self._rule_log_level(rid)
         # On a test run, call services blocking so errors surface in the trace.
         ctx["_test"] = test
         start = dt_util.now()
@@ -393,10 +400,29 @@ class BlocklyEngine:
         end = dt_util.now()
         trace["finished"] = end.isoformat()
         trace["duration"] = round((end - start).total_seconds(), 3)
-        if rid:
+
+        # Per-rule log level controls recording and live push (test always records).
+        is_error = trace["status"] == "error"
+        if test:
+            record = True
+        elif level == "off":
+            record = False
+        elif level == "error":
+            record = is_error
+        else:  # info, debug
+            record = True
+
+        if record and rid:
             bucket = self._traces.setdefault(rid, [])
             bucket.append(trace)
             del bucket[: max(0, len(bucket) - self._max_traces)]
+
+        # Push a live event to the panel for real (non-test) runs.
+        if not test and rid and record:
+            self._hass.bus.async_fire("ha_blockly_trace", {"rule_id": rid, "trace": trace})
+
+        if level == "debug":
+            _LOGGER.warning("[Blockly:%s] %s – %s (%ss)", name, trace["status"], trig.get("platform", "?"), trace["duration"])
         return trace
 
     async def _exec_block(self, statements: list, variables: dict, ctx: dict, trace: dict) -> None:

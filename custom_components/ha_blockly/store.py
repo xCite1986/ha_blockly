@@ -78,6 +78,7 @@ class BlocklyStore:
             "name": rule.get("name") or existing.get("name") or "Unbenannt",
             "folder": rule.get("folder", existing.get("folder", "")),
             "enabled": rule.get("enabled", existing.get("enabled", True)),
+            "log_level": rule.get("log_level", existing.get("log_level", "info")),
             "workspace": rule.get("workspace", existing.get("workspace", {})),
             "ir": rule.get("ir", existing.get("ir", {})),
             "created": existing.get("created", _now()),

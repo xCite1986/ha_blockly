@@ -171,6 +171,12 @@ class HaBlocklyPanel extends HTMLElement {
           <span class="title">🧩 Blockly</span>
           <input class="name" id="hab-name" placeholder="Regelname" />
           <select id="hab-folder"></select>
+          <select id="hab-loglevel" title="Protokollstufe dieser Regel">
+            <option value="off">Protokoll: Aus</option>
+            <option value="error">Protokoll: Fehler</option>
+            <option value="info" selected>Protokoll: Info</option>
+            <option value="debug">Protokoll: Debug</option>
+          </select>
           <button class="hab-btn primary" id="hab-save">Speichern</button>
           <button class="hab-btn" id="hab-new">Neu</button>
           <button class="hab-btn" id="hab-run">Test ▶</button>
@@ -223,6 +229,8 @@ class HaBlocklyPanel extends HTMLElement {
     this._q("#hab-newfolder").onclick = () => this._createFolder();
     this._q("#hab-refresh").onclick = () => this._loadData();
     this._q("#hab-ai-go").onclick = () => this._aiGenerate();
+    this._q("#hab-loglevel").onchange = () => this._onLogLevelChange();
+    this._subscribeTraces();
     this._q("#hab-trace-head").onclick = (e) => {
       if (e.target.tagName === "BUTTON") return;
       this._toggleTrace();
@@ -573,6 +581,7 @@ class HaBlocklyPanel extends HTMLElement {
       this._currentId = id;
       this._q("#hab-name").value = rule.name || "";
       this._q("#hab-folder").value = rule.folder || "";
+      this._q("#hab-loglevel").value = rule.log_level || "info";
       if (rule.workspace && Object.keys(rule.workspace).length) {
         this._Blockly.serialization.workspaces.load(rule.workspace, this._workspace);
       } else {
@@ -589,6 +598,7 @@ class HaBlocklyPanel extends HTMLElement {
   _newRule() {
     this._currentId = null;
     this._q("#hab-name").value = "";
+    this._q("#hab-loglevel").value = "info";
     this._workspace.clear();
     this._renderTree();
     this._renderTrace(null);
@@ -599,9 +609,10 @@ class HaBlocklyPanel extends HTMLElement {
     // Compile the current workspace and store it. Returns { doc, ir }.
     const name = this._q("#hab-name").value.trim() || "Unbenannt";
     const folder = this._q("#hab-folder").value;
+    const log_level = this._q("#hab-loglevel").value || "info";
     const ir = compileWorkspace(this._workspace);
     const workspace = this._Blockly.serialization.workspaces.save(this._workspace);
-    const rule = { name, folder, workspace, ir };
+    const rule = { name, folder, log_level, workspace, ir };
     if (this._currentId) rule.id = this._currentId;
     const doc = await this._ws({ type: "ha_blockly/save", rule });
     this._currentId = doc.id;
@@ -769,6 +780,35 @@ class HaBlocklyPanel extends HTMLElement {
       log.appendChild(line);
     }
     log.scrollTop = log.scrollHeight;
+  }
+
+  async _onLogLevelChange() {
+    const level = this._q("#hab-loglevel").value;
+    if (!this._currentId) {
+      this._status("Protokollstufe gilt ab dem nächsten Speichern: " + level);
+      return;
+    }
+    try {
+      await this._persist();
+      this._status("Protokollstufe gespeichert: " + level);
+    } catch (err) {
+      this._status("Konnte Protokollstufe nicht speichern: " + err.message, true);
+    }
+  }
+
+  _subscribeTraces() {
+    try {
+      this._hass.connection.subscribeEvents((ev) => {
+        const d = (ev && ev.data) || {};
+        if (d.trace && d.rule_id && d.rule_id === this._currentId) {
+          this._showTrace();
+          this._renderTrace(d.trace);
+          this._logTrace(d.trace);
+        }
+      }, "ha_blockly_trace");
+    } catch (e) {
+      /* live updates unavailable */
+    }
   }
 
   async _loadTraces() {
