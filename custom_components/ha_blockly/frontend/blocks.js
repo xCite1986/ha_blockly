@@ -13,6 +13,9 @@ function injectSearchFieldCss() {
   font-family:Roboto,Arial,sans-serif;}
 .hab-fs-search{padding:9px 11px;border:none;border-bottom:1px solid #e0e0e0;
   font-size:14px;outline:none;width:100%;box-sizing:border-box;background:#fff;color:#212121;}
+.hab-fs-dom{margin:8px 11px 0;padding:6px 8px;border:1px solid #ddd;border-radius:6px;
+  font-size:13px;background:#fff;color:#212121;}
+.hab-fs.dark .hab-fs-dom{background:#1e1e1e;color:#e0e0e0;border-color:#444;}
 .hab-fs-list{max-height:min(60vh,520px);overflow:auto;}
 .hab-fs-item{padding:8px 11px;font-size:13px;cursor:pointer;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;color:#212121;}
@@ -106,7 +109,11 @@ function defineSearchField(Blockly) {
     _subLabel(o) {
       const api = window.__haBlockly || {};
       try {
-        if (this.variant_ === "entity") return this._friendly(o);
+        if (this.variant_ === "entity") {
+          const fn = this._friendly(o);
+          const area = api.entityArea ? api.entityArea(o) : "";
+          return area ? (fn ? fn + " · " + area : area) : fn;
+        }
         if (this.variant_ === "state" || this.variant_ === "cmpstate") {
           return api.stateLabel ? api.stateLabel(this._resolveStateEntity(), o) : "";
         }
@@ -142,6 +149,7 @@ function defineSearchField(Blockly) {
         this.setValue(val);
         DD.hideIfOwner(this);
       };
+      let domFilter = "";
       const render = (q) => {
         list.innerHTML = "";
         // Always offer a way to clear the field (empty value).
@@ -156,6 +164,7 @@ function defineSearchField(Blockly) {
         const ql = (q || "").toLowerCase();
         const matches = [];
         for (const o of options) {
+          if (domFilter && !o.startsWith(domFilter + ".")) continue;
           const fn = this._subLabel(o);
           if (!ql || o.toLowerCase().includes(ql) || (fn && fn.toLowerCase().includes(ql))) {
             matches.push([o, fn]);
@@ -186,6 +195,20 @@ function defineSearchField(Blockly) {
           list.appendChild(item);
         }
       };
+      // Domain filter for entity pickers (e.g. only lights).
+      if (this.variant_ === "entity") {
+        const domSel = document.createElement("select");
+        domSel.className = "hab-fs-dom";
+        const domains = [...new Set(options.map((o) => o.split(".")[0]))].sort();
+        domSel.innerHTML =
+          '<option value="">Alle Domänen</option>' +
+          domains.map((d) => `<option value="${d}">${d}</option>`).join("");
+        domSel.addEventListener("change", () => {
+          domFilter = domSel.value;
+          render(search.value);
+        });
+        wrap.insertBefore(domSel, list);
+      }
       let edited = false;
       render("");
       search.addEventListener("input", () => {
@@ -251,12 +274,58 @@ export function defineBlocks(Blockly) {
     },
     {
       type: "ha_on_time",
-      message0: "Jeden Tag um %1 Uhr",
-      args0: [{ type: "field_input", name: "TIME", text: "07:00:00" }],
+      message0: "Um %1 Uhr  an %2",
+      args0: [
+        { type: "field_input", name: "TIME", text: "07:00:00" },
+        {
+          type: "field_dropdown",
+          name: "WEEKDAYS",
+          options: [
+            ["täglich", "daily"],
+            ["Mo–Fr", "mon-fri"],
+            ["Sa+So", "sat-sun"],
+            ["Montag", "0"],
+            ["Dienstag", "1"],
+            ["Mittwoch", "2"],
+            ["Donnerstag", "3"],
+            ["Freitag", "4"],
+            ["Samstag", "5"],
+            ["Sonntag", "6"],
+          ],
+        },
+      ],
       message1: "mache %1",
       args1: [{ type: "input_statement", name: "DO" }],
       colour: C_TRIGGER,
-      tooltip: "Löst täglich zur angegebenen Uhrzeit aus (HH:MM:SS).",
+      tooltip: "Löst zur angegebenen Uhrzeit (HH:MM:SS) an den gewählten Tagen aus.",
+    },
+    {
+      type: "ha_on_calendar",
+      message0: "Kalender %1 Termin %2",
+      args0: [
+        { type: "field_search", name: "ENTITY", text: "calendar.beispiel", variant: "entity" },
+        {
+          type: "field_dropdown",
+          name: "EVENT",
+          options: [
+            ["beginnt", "start"],
+            ["endet", "end"],
+          ],
+        },
+      ],
+      message1: "mache %1",
+      args1: [{ type: "input_statement", name: "DO" }],
+      colour: C_TRIGGER,
+      tooltip: "Löst aus, wenn ein Kalendertermin beginnt/endet (über den Zustand der Kalender-Entität).",
+    },
+    {
+      type: "ha_on_device",
+      message0: "Bei Ereignis-Entität %1",
+      args0: [{ type: "field_search", name: "ENTITY", text: "event.beispiel", variant: "entity" }],
+      message1: "mache %1",
+      args1: [{ type: "input_statement", name: "DO" }],
+      colour: C_TRIGGER,
+      tooltip: "Löst aus, wenn eine Ereignis-Entität auslöst (z.B. Taster/Fernbedienung, event.*).",
     },
     {
       type: "ha_on_event",
@@ -728,6 +797,8 @@ export const TOOLBOX = {
         { kind: "block", type: "ha_on_time" },
         { kind: "block", type: "ha_on_sun" },
         { kind: "block", type: "ha_on_zone" },
+        { kind: "block", type: "ha_on_calendar" },
+        { kind: "block", type: "ha_on_device" },
         { kind: "block", type: "ha_on_event" },
         { kind: "block", type: "ha_on_start" },
       ],

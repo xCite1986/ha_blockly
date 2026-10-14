@@ -216,6 +216,7 @@ class HaBlocklyPanel extends HTMLElement {
           <button class="hab-btn" id="hab-new">Neu</button>
           <button class="hab-btn" id="hab-run">Test ▶</button>
           <button class="hab-btn" id="hab-reload">Engine neu laden</button>
+          <button class="hab-btn" id="hab-expert" title="Expertenmodus: blendet freie HA-Aktion, Templates und Roh-Events ein/aus">Experte: Aus</button>
           <button class="hab-btn hab-theme" id="hab-theme" title="Hell / Dunkel umschalten">🌙</button>
         </div>
         <div class="hab-status" id="hab-status"></div>
@@ -260,7 +261,14 @@ class HaBlocklyPanel extends HTMLElement {
     this._q("#hab-new").onclick = () => this._newRule();
     this._q("#hab-run").onclick = () => this._runCurrent();
     this._q("#hab-reload").onclick = () => this._reloadEngine();
+    this._q("#hab-expert").onclick = () => this._toggleExpert();
     this._q("#hab-theme").onclick = () => this._toggleTheme();
+    try {
+      this._expert = localStorage.getItem("ha_blockly_expert") === "1";
+    } catch (e) {
+      this._expert = false;
+    }
+    this._q("#hab-expert").textContent = this._expert ? "Experte: An" : "Experte: Aus";
     this._q("#hab-newfolder").onclick = () => this._createFolder();
     this._q("#hab-refresh").onclick = () => this._loadData();
     this._q("#hab-ai-go").onclick = () => this._aiGenerate();
@@ -290,7 +298,7 @@ class HaBlocklyPanel extends HTMLElement {
       const Blockly = await loadBlockly();
       defineBlocks(Blockly);
       this._workspace = Blockly.inject(this._q("#hab-blockly"), {
-        toolbox: TOOLBOX,
+        toolbox: this._filterToolbox(this._expert),
         renderer: "zelos",
         grid: { spacing: 22, length: 3, colour: "#ccc", snap: true },
         zoom: { controls: true, wheel: true, startScale: 0.9 },
@@ -392,6 +400,31 @@ class HaBlocklyPanel extends HTMLElement {
     this._applyTheme(this._theme === "dark" ? "light" : "dark");
   }
 
+  _filterToolbox(expert) {
+    const ADV = new Set(["ha_call_service", "ha_template", "ha_on_event", "ha_fire_event"]);
+    const clone = JSON.parse(JSON.stringify(TOOLBOX));
+    if (!expert) {
+      for (const cat of clone.contents || []) {
+        if (cat.contents) {
+          cat.contents = cat.contents.filter((it) => !(it.kind === "block" && ADV.has(it.type)));
+        }
+      }
+    }
+    return clone;
+  }
+
+  _toggleExpert() {
+    this._expert = !this._expert;
+    try {
+      localStorage.setItem("ha_blockly_expert", this._expert ? "1" : "0");
+    } catch (e) {
+      /* ignore */
+    }
+    const btn = this._q("#hab-expert");
+    if (btn) btn.textContent = this._expert ? "Experte: An" : "Experte: Aus";
+    if (this._workspace) this._workspace.updateToolbox(this._filterToolbox(this._expert));
+  }
+
   _setupAutocomplete() {
     // Expose live entity/domain/service lists to the searchable Blockly fields.
     const getHass = () => this._hass;
@@ -424,6 +457,10 @@ class HaBlocklyPanel extends HTMLElement {
         const domain = entityId ? entityId.split(".")[0] : "";
         const st = h && h.states && h.states[entityId];
         const dc = st && st.attributes ? st.attributes.device_class : null;
+        if (/^\d+$/.test(v) && ["light", "cover", "fan", "media_player"].includes(domain)) {
+          const unit = { light: "Helligkeit", cover: "Position", fan: "Stufe", media_player: "Lautstärke" }[domain];
+          return `${unit} ${v} %`;
+        }
         if (domain === "binary_sensor" && dc) {
           const bmap = {
             motion: ["Bewegung erkannt", "Keine Bewegung"],
@@ -518,11 +555,42 @@ class HaBlocklyPanel extends HTMLElement {
           weather: ["sunny", "clear-night", "cloudy", "fog", "hail", "lightning", "partlycloudy", "pouring", "rainy", "snowy", "windy"],
         };
         let opts = map[domain] ? map[domain].slice() : [];
+        // Capability-aware numeric suggestions (shown as % in the label).
+        const sf = Number(attrs.supported_features || 0);
+        if (domain === "light") {
+          const modes = attrs.supported_color_modes || [];
+          const dimmable = attrs.brightness != null || modes.some((m) => m && m !== "onoff");
+          if (dimmable) opts = opts.concat(["25", "50", "75", "100"]);
+        } else if (domain === "cover") {
+          if (attrs.current_position != null || (sf & 4)) opts = opts.concat(["25", "50", "75"]);
+        } else if (domain === "fan") {
+          if (attrs.percentage != null || attrs.percentage_step != null || (sf & 1)) {
+            opts = opts.concat(["25", "50", "75", "100"]);
+          }
+        } else if (domain === "media_player") {
+          if (attrs.volume_level != null || (sf & 4)) opts = opts.concat(["25", "50", "75", "100"]);
+        }
         if (cur != null && cur !== "unknown" && cur !== "unavailable" && opts.indexOf(cur) === -1) {
           opts.unshift(cur);
         }
         if (!opts.length && cur != null) opts = [cur];
         return opts;
+      },
+      entityArea: (entityId) => {
+        const h = getHass();
+        if (!h || !entityId) return "";
+        try {
+          const ent = h.entities && h.entities[entityId];
+          let areaId = ent && ent.area_id;
+          if (!areaId && ent && ent.device_id && h.devices) {
+            const dev = h.devices[ent.device_id];
+            areaId = dev && dev.area_id;
+          }
+          if (areaId && h.areas && h.areas[areaId]) return h.areas[areaId].name || "";
+        } catch (e) {
+          /* ignore */
+        }
+        return "";
       },
     };
   }

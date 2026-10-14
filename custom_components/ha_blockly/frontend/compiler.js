@@ -52,7 +52,23 @@ function compileTrigger(block) {
       return { trigger: trig };
     }
     case "ha_on_time":
-      return { trigger: { type: "time", at: field(block, "TIME") || "00:00:00" } };
+      return {
+        trigger: {
+          type: "time",
+          at: field(block, "TIME") || "00:00:00",
+          weekdays: field(block, "WEEKDAYS") || "daily",
+        },
+      };
+    case "ha_on_calendar":
+      return {
+        trigger: {
+          type: "state",
+          entity: field(block, "ENTITY"),
+          to: field(block, "EVENT") === "end" ? "off" : "on",
+        },
+      };
+    case "ha_on_device":
+      return { trigger: { type: "state", entity: field(block, "ENTITY") } };
     case "ha_on_sun":
       return {
         trigger: {

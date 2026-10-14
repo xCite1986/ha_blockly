@@ -201,9 +201,12 @@ class BlocklyEngine:
         while len(parts) < 3:
             parts.append(0)
         h, m, s = parts[:3]
+        weekdays = _weekday_set(trig.get("weekdays"))
 
         @callback
         def _handle(now) -> None:
+            if weekdays is not None and now.weekday() not in weekdays:
+                return
             self._fire(rid, name, actions, {"trigger": {"platform": "time", "now": now.isoformat()}})
 
         self._unsubs.append(
@@ -604,10 +607,16 @@ class BlocklyEngine:
                 await call("lock", "lock")
             return
         if domain == "light" and num is not None:
-            await call("light", "turn_on", {"brightness": int(num)})
+            # Numeric light value = brightness in percent (0-100).
+            await call("light", "turn_on", {"brightness_pct": int(num)})
+            return
+        if domain == "fan" and num is not None:
+            await call("fan", "set_percentage", {"percentage": int(num)})
             return
         if domain == "media_player" and num is not None:
-            await call("media_player", "volume_set", {"volume_level": num})
+            # Accept 0-100 (%) or 0-1 for the volume level.
+            level = num / 100.0 if num > 1 else num
+            await call("media_player", "volume_set", {"volume_level": round(level, 3)})
             return
 
         # Generic on/off.
@@ -771,6 +780,20 @@ def _to_bool(v):
     if s in _FALSE_WORDS:
         return False
     return None
+
+
+def _weekday_set(spec):
+    """Map a weekday spec to a set of Python weekdays (Mon=0..Sun=6), or None=all."""
+    if not spec or spec == "daily":
+        return None
+    if spec == "mon-fri":
+        return {0, 1, 2, 3, 4}
+    if spec == "sat-sun":
+        return {5, 6}
+    try:
+        return {int(spec)}
+    except (TypeError, ValueError):
+        return None
 
 
 def _compare(left, op, right) -> bool:
