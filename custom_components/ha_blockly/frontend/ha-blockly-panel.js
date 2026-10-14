@@ -70,9 +70,19 @@ const STYLES = `
 .hab-status{font-size:12px;color:var(--secondary-text-color,#727272);padding:4px 12px;min-height:16px;}
 .hab-empty{padding:16px;color:var(--secondary-text-color,#888);font-size:13px;}
 .hab-btn.hab-theme{margin-left:auto;font-size:16px;line-height:1;padding:6px 10px;}
-/* Toolbox category labels: force legibility inside the HA shadow root */
+/* Toolbox category labels: fixed colours (independent of the HA theme) */
 .hab-root .blocklyToolboxCategoryLabel,.hab-root .blocklyTreeLabel{
-  color:var(--primary-text-color,#111)!important;font-size:14px!important;vertical-align:middle;}
+  color:#2b2b2b!important;font-size:14px!important;vertical-align:middle;}
+/* Light mode (fixed so the toggle works regardless of HA's own theme) */
+.hab-root[data-theme="light"]{background:#fafafa;color:#212121;}
+.hab-root[data-theme="light"] .hab-side{background:#ffffff;border-left-color:#e0e0e0;}
+.hab-root[data-theme="light"] .hab-side h3{color:#727272;}
+.hab-root[data-theme="light"] .hab-side-actions .hab-btn{background:#e8e8e8;color:#212121;}
+.hab-root[data-theme="light"] .hab-tree,.hab-root[data-theme="light"] .hab-folder{color:#212121;}
+.hab-root[data-theme="light"] .hab-rule:hover{background:#f0f0f0;}
+.hab-root[data-theme="light"] .hab-ai textarea{background:#ffffff;color:#212121;border-color:#ccc;}
+.hab-root[data-theme="light"] .hab-status{color:#727272;}
+.hab-root[data-theme="light"] .hab-toolbar input,.hab-root[data-theme="light"] .hab-toolbar select{background:#fff;color:#212121;}
 /* Dark mode */
 .hab-root[data-theme="dark"]{background:#1e1e1e;color:#e0e0e0;}
 .hab-root[data-theme="dark"] .hab-side{background:#252525;border-left-color:#333;}
@@ -182,7 +192,18 @@ class HaBlocklyPanel extends HTMLElement {
 
       // Light/dark Blockly themes for the sun/moon toggle.
       this._themes = {
-        light: Blockly.Themes.Classic,
+        light: Blockly.Theme.defineTheme("habLight", {
+          name: "habLight",
+          base: Blockly.Themes.Classic,
+          componentStyles: {
+            workspaceBackgroundColour: "#ffffff",
+            toolboxBackgroundColour: "#f5f5f5",
+            toolboxForegroundColour: "#2b2b2b",
+            flyoutBackgroundColour: "#ffffff",
+            flyoutForegroundColour: "#2b2b2b",
+            scrollbarColour: "#cccccc",
+          },
+        }),
         dark: Blockly.Theme.defineTheme("habDark", {
           name: "habDark",
           base: Blockly.Themes.Classic,
