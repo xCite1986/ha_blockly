@@ -19,6 +19,8 @@ function injectSearchFieldCss() {
 .hab-fs-item:hover,.hab-fs-item.sel{background:#e8f0fe;}
 .hab-fs-item .sub{color:#888;font-size:11px;margin-left:6px;}
 .hab-fs-empty{padding:12px;color:#888;font-size:13px;}
+.hab-fs-item.hab-fs-clear{color:#9e9e9e;font-style:italic;border-bottom:1px solid #eee;}
+.hab-fs.dark .hab-fs-item.hab-fs-clear{color:#aaa;border-bottom-color:#3a3a3a;}
 .hab-fs.dark .hab-fs-search{background:#1e1e1e;color:#e0e0e0;border-bottom-color:#444;}
 .hab-fs.dark .hab-fs-item{color:#e0e0e0;}
 .hab-fs.dark .hab-fs-item:hover,.hab-fs.dark .hab-fs-item.sel{background:#3a3a3a;}
@@ -124,6 +126,15 @@ function defineSearchField(Blockly) {
       };
       const render = (q) => {
         list.innerHTML = "";
+        // Always offer a way to clear the field (empty value).
+        const clearItem = document.createElement("div");
+        clearItem.className = "hab-fs-item hab-fs-clear";
+        clearItem.textContent = "— leeren —";
+        clearItem.addEventListener("mousedown", (ev) => {
+          ev.preventDefault();
+          commit("");
+        });
+        list.appendChild(clearItem);
         const ql = (q || "").toLowerCase();
         const matches = [];
         for (const o of options) {
@@ -166,9 +177,13 @@ function defineSearchField(Blockly) {
       search.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") {
           ev.preventDefault();
-          const first = list.querySelector(".hab-fs-item");
+          if (!search.value.trim()) {
+            commit(""); // empty box -> clear the field
+            return;
+          }
+          const first = list.querySelector(".hab-fs-item:not(.hab-fs-clear)");
           if (edited && first) commit(first.firstChild.textContent);
-          else commit(search.value); // unchanged prefill, typed text, or empty to clear
+          else commit(search.value); // unchanged prefill or typed text
         } else if (ev.key === "Escape") {
           DD.hideIfOwner(this);
         }
