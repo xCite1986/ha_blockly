@@ -73,6 +73,13 @@ const STYLES = `
 /* Toolbox category labels: fixed colours (independent of the HA theme) */
 .hab-root .blocklyToolboxCategoryLabel,.hab-root .blocklyTreeLabel{
   color:#2b2b2b!important;font-size:14px!important;vertical-align:middle;}
+/* Editable field boxes on blocks: Blockly's default field CSS (white fill) does
+   not reach the shadow root, so the rect renders black. Set it explicitly.
+   Only editable fields are targeted, so block labels keep their own colour. */
+.hab-root .blocklyFieldRect{fill:#ffffff!important;stroke:#c7c7c7!important;fill-opacity:1!important;}
+.hab-root .blocklyEditableText>text{fill:#202020!important;}
+.hab-root[data-theme="dark"] .blocklyFieldRect{fill:#3b3b3b!important;stroke:#555555!important;}
+.hab-root[data-theme="dark"] .blocklyEditableText>text{fill:#f0f0f0!important;}
 /* Light mode (fixed so the toggle works regardless of HA's own theme) */
 .hab-root[data-theme="light"]{background:#fafafa;color:#212121;}
 .hab-root[data-theme="light"] .hab-side{background:#ffffff;border-left-color:#e0e0e0;}
