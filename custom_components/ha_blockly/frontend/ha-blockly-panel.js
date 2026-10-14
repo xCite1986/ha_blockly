@@ -2,9 +2,28 @@
 // Rendered in light DOM (Blockly injects its CSS into document head and works
 // best outside a shadow root). All styles are scoped under .hab-root.
 
-import { defineBlocks, TOOLBOX } from "./blocks.js";
-import { compileWorkspace } from "./compiler.js";
-import { buildFromIR } from "./irloader.js";
+// Sub-modules are imported dynamically with this file's own version query so a
+// released update busts them too (static imports would keep a cached copy).
+let defineBlocks, TOOLBOX, compileWorkspace, buildFromIR;
+
+async function loadModules() {
+  if (defineBlocks) return;
+  let v = "";
+  try {
+    v = new URL(import.meta.url).search || "";
+  } catch (e) {
+    /* ignore */
+  }
+  const [blocksMod, compilerMod, loaderMod] = await Promise.all([
+    import("./blocks.js" + v),
+    import("./compiler.js" + v),
+    import("./irloader.js" + v),
+  ]);
+  defineBlocks = blocksMod.defineBlocks;
+  TOOLBOX = blocksMod.TOOLBOX;
+  compileWorkspace = compilerMod.compileWorkspace;
+  buildFromIR = loaderMod.buildFromIR;
+}
 
 const BLOCKLY_SRC = "/ha_blockly_frontend/vendor/blockly.min.js";
 
@@ -174,6 +193,7 @@ class HaBlocklyPanel extends HTMLElement {
   }
 
   async _build() {
+    await loadModules();
     this.innerHTML = `
       <style>${STYLES}</style>
       <div class="hab-root">
