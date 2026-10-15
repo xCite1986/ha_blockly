@@ -47,13 +47,26 @@ class BlocklyEngine:
         # Per-rule execution traces (most recent last), capped per rule.
         self._traces: dict[str, list] = {}
         self._max_traces = 15
+        # Triggers stay disarmed until HA has finished starting, so the initial
+        # state population on a reboot does not fire every rule.
+        self._ready = False
 
     def get_traces(self, rule_id: str) -> list:
         """Return recorded execution traces for a rule (most recent first)."""
         return list(reversed(self._traces.get(rule_id, [])))
 
     async def async_start(self) -> None:
+        if self._hass.is_running:
+            self._ready = True
+        else:
+            self._hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED, self._on_ha_started
+            )
         self.reload()
+
+    @callback
+    def _on_ha_started(self, event) -> None:
+        self._ready = True
 
     @callback
     def reload(self) -> None:
@@ -122,7 +135,7 @@ class BlocklyEngine:
                 self._unsubs.append(
                     self._hass.bus.async_listen_once(
                         EVENT_HOMEASSISTANT_STARTED,
-                        lambda e, a=actions, n=name, r=rid: self._fire(r, n, a, {"trigger": {"platform": "homeassistant"}}),
+                        lambda e, a=actions, n=name, r=rid: self._fire(r, n, a, {"trigger": {"platform": "homeassistant"}}, force=True),
                     )
                 )
             else:
@@ -354,7 +367,10 @@ class BlocklyEngine:
     # --- Execution --------------------------------------------------------
 
     @callback
-    def _fire(self, rid: str, name: str, actions: list, ctx: dict, *, test: bool = False) -> None:
+    def _fire(self, rid: str, name: str, actions: list, ctx: dict, *, test: bool = False, force: bool = False) -> None:
+        # Ignore triggers until HA has finished starting (avoids reboot storms).
+        if not self._ready and not force:
+            return
         task = self._hass.async_create_task(self._run(rid, name, actions, ctx, test=test))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)

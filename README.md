@@ -12,6 +12,8 @@ Eintrag **„Blockly“ in der linken Seitenleiste**, speichert Regeln in einer
 der aus einer Texteingabe über die in Home Assistant eingebundenen
 LLM-/Konversationsagenten ein fertiges Blockly-Setup erzeugt.
 
+![HA Blockly Automations – Editor mit Regel, Trace-Protokoll und KI-Editor](docs/screenshot.png)
+
 ## Funktionen
 
 - 🧩 **Visueller Editor** in der Seitenleiste – Blöcke per Drag & Drop

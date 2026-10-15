@@ -64,27 +64,37 @@ schema: "triggers" (with "type"), "actions" (with "type"), and split services
 into "domain" + "service"."""
 
 
+def _repair_json(text: str) -> str:
+    # Remove trailing commas before } or ] (common in weak-model output).
+    return re.sub(r",(\s*[}\]])", r"\1", text)
+
+
 def _extract_json(text: str) -> dict[str, Any] | None:
+    if not text:
+        return None
     text = text.strip()
     # strip markdown code fences if present
     text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
     text = re.sub(r"\n?```$", "", text).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    # fallback: grab the outermost braces
+    for candidate in (text, _repair_json(text)):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+    # fallback: grab the outermost braces (also repaired)
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end > start:
-        try:
-            return json.loads(text[start : end + 1])
-        except json.JSONDecodeError:
-            return None
+        inner = text[start : end + 1]
+        for candidate in (inner, _repair_json(inner)):
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
     return None
 
 
-def _entity_context(hass: HomeAssistant, limit: int = 400) -> str:
+def _entity_context(hass: HomeAssistant, limit: int = 200) -> str:
     lines: list[str] = []
     for state in hass.states.async_all():
         if len(lines) >= limit:
@@ -143,25 +153,44 @@ async def async_generate_ir(
         f"Return only the JSON IR object."
     )
 
-    try:
+    async def _ask(text: str) -> str:
         result = await conversation.async_converse(
             hass,
-            text=user_text,
+            text=text,
             conversation_id=None,
             context=Context(),
             language=hass.config.language,
             agent_id=agent_id or None,
         )
+        try:
+            return result.response.speech.get("plain", {}).get("speech", "")
+        except AttributeError:
+            return str(result)
+
+    try:
+        speech = await _ask(user_text)
     except Exception as err:  # noqa: BLE001
         _LOGGER.exception("AI generation failed")
         return {"error": f"Conversation agent error: {err}"}
 
-    try:
-        speech = result.response.speech.get("plain", {}).get("speech", "")
-    except AttributeError:
-        speech = str(result)
-
     ir = _extract_json(speech)
+    if ir is None:
+        # Weak/local models often add prose or malformed JSON — retry once with a
+        # short, strict correction prompt (keeps the request, drops the big dump).
+        retry_text = (
+            f"{SYSTEM_PROMPT}\n\nUser request:\n{prompt}\n\n"
+            "Your previous answer was not valid JSON. Respond with ONLY a single "
+            "JSON object for the schema above. No markdown, no code fences, no "
+            "explanation, no comments. Start with { and end with }."
+        )
+        try:
+            speech2 = await _ask(retry_text)
+            ir = _extract_json(speech2)
+            if ir is None:
+                speech = speech2 or speech
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("AI retry failed", exc_info=True)
+
     if ir is None:
         return {"error": "Could not parse a JSON program from the agent response.", "raw": speech}
     ir.setdefault("version", 1)
